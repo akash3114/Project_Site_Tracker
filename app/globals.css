@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Linear-style field-ops console tokens (v1, light ground) */
+    --pst-bg: #f4f5f7;
+    --pst-surface: #ffffff;
+    --pst-surface-quiet: #fafbfc;
+    --pst-hairline: rgba(23, 34, 44, 0.08);
+    --pst-sidebar: #0e121b;
+    --pst-accent: #5e6ad2;
+    --pst-ink: #17222c;
+    --pst-secondary: #5c6f7e;
+    --pst-muted: #8a97a3;
+    --pst-todo: #64748b;
+    --pst-inprogress: #5e6ad2;
+    --pst-blocked-bg: #fef3c7;
+    --pst-blocked-fg: #92400e;
+    --pst-completed-bg: #dcfce7;
+    --pst-completed-fg: #166534;
+    --pst-overdue: #dc2626;
+
+    --background: 220 14% 96%;
+    --foreground: 203 32% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 203 32% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 203 32% 13%;
+    --primary: 233 54% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 203 32% 13%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 200 11% 43%;
+    --accent: 233 54% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 203 16% 92%;
+    --input: 203 16% 92%;
+    --ring: 233 54% 60%;
+    --chart-1: 233 54% 60%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.75rem;
+  }
+  .dark {
+    --background: 203 32% 13%;
+    --foreground: 0 0% 98%;
+    --card: 203 32% 13%;
+    --card-foreground: 0 0% 98%;
+    --popover: 203 32% 13%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 203 32% 13%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    background-color: var(--pst-bg);
+    color: var(--pst-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--pst-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Linear-style motion: 150ms hover ease-out, 350ms layout */
+  .pst-transition {
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  .pst-layout {
+    transition-duration: 350ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .pst-hairline {
+    border-color: var(--pst-hairline);
+  }
+  .pst-display {
+    letter-spacing: -0.02em;
+  }
+}

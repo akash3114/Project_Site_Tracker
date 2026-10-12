@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String            @id @default(cuid())
+  name         String
+  email        String            @unique
+  passwordHash String
+  role         Role              @default(SITE_USER)
+  active       Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  accesses     UserPlazaAccess[]
+  assignedTasks Task[]           @relation("Assignee")
+  createdTasks  Task[]           @relation("Creator")
+  events        TaskEvent[]
+
+  @@index([role])
+  @@index([active])
+}
+
+enum Role {
+  ADMIN
+  PROJECT_LEAD
+  SITE_USER
+}
+
+model Project {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  status      MasterStatus @default(ACTIVE)
+  plazas      Plaza[]
+  createdById String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([status])
+}
+
+enum MasterStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+}
+
+model Plaza {
+  id        String       @id @default(cuid())
+  projectId String
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  name      String
+  chainage  String?
+  highway   String?
+  location  String?
+  status    MasterStatus @default(ACTIVE)
+  accesses  UserPlazaAccess[]
+  tasks     Task[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@index([status])
+}
+
+model UserPlazaAccess {
+  userId      String
+  plazaId     String
+  grantedById String?
+  grantedAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plaza       Plaza    @relation(fields: [plazaId], references: [id], onDelete: Cascade)
+
+  @@id([userId, plazaId])
+  @@index([userId])
+  @@index([plazaId])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  plazaId     String
+  plaza       Plaza      @relation(fields: [plazaId], references: [id], onDelete: Restrict)
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  priority    Priority   @default(MEDIUM)
+  assigneeId  String?
+  assignee    User?      @relation("Assignee", fields: [assigneeId], references: [id])
+  createdById String
+  createdBy   User       @relation("Creator", fields: [createdById], references: [id])
+  dueDate     DateTime?  @db.Date
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  events      TaskEvent[]
+
+  @@index([plazaId, status])
+  @@index([assigneeId])
+  @@index([dueDate])
+  @@index([plazaId])
+  @@index([status])
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model TaskEvent {
+  id         String      @id @default(cuid())
+  taskId     String
+  task       Task        @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  actorId    String
+  actor      User        @relation(fields: [actorId], references: [id])
+  type       EventType
+  fromStatus TaskStatus?
+  toStatus   TaskStatus?
+  text       String?
+  createdAt  DateTime    @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([actorId])
+}
+
+enum EventType {
+  CREATED
+  STATUS
+  ASSIGN
+  COMMENT
+  REOPEN
+  META
+}
