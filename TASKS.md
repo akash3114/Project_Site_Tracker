@@ -7,7 +7,10 @@
 
 ---
 
-## 0. Dummy Data Contract (used by all seed/UI tasks)
+## 0. Dummy Data Contract (SUPERSEDED — see prisma/real-data.ts)
+> Real masters now come from project_name_export.xlsx: 28 projects / 41 plazas
+> (offices excluded, one cell = one plaza). Users still dummy (27).
+> Apply with SEED_RESET=1 + seed (full wipe, pre-pilot only).
 
 ### 0.1 Projects (3)
 1. `P1 — NH-48 Gujarat Corridor` — `status: ACTIVE`, desc: "Pilot package: 10 plazas on NH-48"

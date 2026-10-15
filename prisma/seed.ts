@@ -1,77 +1,34 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
+import { REAL_PROJECTS } from './real-data';
+
 const db = new PrismaClient();
 
 const hashPw = (s: string) => bcrypt.hash(s, 12);
 
 // ---------------------------------------------------------------------------
-// Dummy masters (TASKS.md §0)
+// Masters from project_name_export.xlsx (28 projects / 41 plazas).
+// Corporate Office rows excluded; one cell = one plaza (comma-split only).
+// Chainage/highway/location unknown in source → null.
 // ---------------------------------------------------------------------------
 
-const PROJECTS = [
-  {
-    name: 'NH-48 Gujarat Corridor',
-    status: 'ACTIVE' as const,
-    description: 'Pilot package: 10 plazas on NH-48',
-  },
-  {
-    name: 'NH-27 Saurashtra Stretch',
-    status: 'ACTIVE' as const,
-    description: 'Pilot package: 10 plazas on NH-27',
-  },
-  {
-    name: 'NH-147 Ahmedabad Ring',
-    status: 'ON_HOLD' as const,
-    description: 'Pilot package: 8 plazas on NH-147',
-  },
-];
+const PROJECTS = REAL_PROJECTS.map((p) => ({
+  name: p.name,
+  status: 'ACTIVE' as const,
+  description: `${p.company} (${p.code})`,
+}));
 
 interface PlazaSeed {
+  projectIndex: number;
   name: string;
-  chainage: string;
-  highway: string;
-  status: 'ACTIVE' | 'ON_HOLD';
 }
 
-// Index 0 -> P1 (NH-48), 1 -> P2 (NH-27), 2 -> P3 (NH-147).
-// P3: last two plazas ON_HOLD, rest ACTIVE.
-const PLAZAS: PlazaSeed[][] = [
-  [
-    { name: 'Karjan', chainage: 'KM 123+450', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Ankleshwar', chainage: 'KM 157+200', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Bharuch', chainage: 'KM 178+900', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Narmada', chainage: 'KM 192+300', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Surat-Kamrej', chainage: 'KM 215+600', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Navsari', chainage: 'KM 238+100', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Valsad', chainage: 'KM 256+800', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Vapi', chainage: 'KM 278+400', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Palsana', chainage: 'KM 205+000', highway: 'NH-48', status: 'ACTIVE' },
-    { name: 'Olpad', chainage: 'KM 198+700', highway: 'NH-48', status: 'ACTIVE' },
-  ],
-  [
-    { name: 'Rajkot-Jetpur', chainage: 'KM 45+200', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Gondal', chainage: 'KM 62+800', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Dhoraji', chainage: 'KM 84+100', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Upleta', chainage: 'KM 98+500', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Junagadh Bypass', chainage: 'KM 112+300', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Keshod', chainage: 'KM 128+900', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Mangrol', chainage: 'KM 145+200', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Porbandar', chainage: 'KM 168+000', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Kutiyana', chainage: 'KM 152+400', highway: 'NH-27', status: 'ACTIVE' },
-    { name: 'Ranavav', chainage: 'KM 160+700', highway: 'NH-27', status: 'ACTIVE' },
-  ],
-  [
-    { name: 'Sanand', chainage: 'KM 12+300', highway: 'NH-147', status: 'ACTIVE' },
-    { name: 'Bavla', chainage: 'KM 28+600', highway: 'NH-147', status: 'ACTIVE' },
-    { name: 'Dholka', chainage: 'KM 44+100', highway: 'NH-147', status: 'ACTIVE' },
-    { name: 'Bagodara', chainage: 'KM 58+900', highway: 'NH-147', status: 'ACTIVE' },
-    { name: 'Vataman', chainage: 'KM 71+200', highway: 'NH-147', status: 'ACTIVE' },
-    { name: 'Fedara', chainage: 'KM 82+500', highway: 'NH-147', status: 'ACTIVE' },
-    { name: 'Dhandhuka', chainage: 'KM 95+800', highway: 'NH-147', status: 'ON_HOLD' },
-    { name: 'Limbdi', chainage: 'KM 110+400', highway: 'NH-147', status: 'ON_HOLD' },
-  ],
-];
+const PLAZAS: PlazaSeed[] = REAL_PROJECTS.flatMap((p, projectIndex) =>
+  p.plazas.map((name) => ({ projectIndex, name })),
+);
+
+const N_PLAZAS = PLAZAS.length; // 41
 
 // 40 fixed realistic titles: 20 TODO / 10 IN_PROGRESS / 4 BLOCKED / 6 COMPLETED.
 const TASK_TITLES = [
@@ -178,30 +135,25 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
   }
 
   // ---- Plazas (upsert by [projectId, name]) ----
-  const plazaIds: string[] = []; // creation order: P1 x10, P2 x10, P3 x8 (index 0..27)
+  const plazaIds: string[] = []; // flat creation order over PLAZAS (41)
   const plazaNames: string[] = [];
-  for (let pi = 0; pi < PLAZAS.length; pi++) {
-    for (const pl of PLAZAS[pi]) {
-      const plaza = await db.plaza.upsert({
-        where: { projectId_name: { projectId: projectIds[pi], name: pl.name } },
-        update: {
-          chainage: pl.chainage,
-          highway: pl.highway,
-          location: `${pl.name}, Gujarat`,
-          status: pl.status,
-        },
-        create: {
-          projectId: projectIds[pi],
-          name: pl.name,
-          chainage: pl.chainage,
-          highway: pl.highway,
-          location: `${pl.name}, Gujarat`,
-          status: pl.status,
-        },
-      });
-      plazaIds.push(plaza.id);
-      plazaNames.push(pl.name);
-    }
+  const plazaProjectIdx: number[] = [];
+  for (const pl of PLAZAS) {
+    const plaza = await db.plaza.upsert({
+      where: { projectId_name: { projectId: projectIds[pl.projectIndex], name: pl.name } },
+      update: { chainage: null, highway: null, location: null, status: 'ACTIVE' },
+      create: {
+        projectId: projectIds[pl.projectIndex],
+        name: pl.name,
+        chainage: null,
+        highway: null,
+        location: null,
+        status: 'ACTIVE',
+      },
+    });
+    plazaIds.push(plaza.id);
+    plazaNames.push(pl.name);
+    plazaProjectIdx.push(pl.projectIndex);
   }
 
   // ---- Users (upsert by email, bcrypt cost 12) ----
@@ -218,10 +170,15 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
   });
 
   const leadDefs = [
-    { name: 'Lead P1', email: 'lead.p1@tracker.local', projectIndex: 0 },
-    { name: 'Lead P2', email: 'lead.p2@tracker.local', projectIndex: 1 },
-    { name: 'Lead P3', email: 'lead.p3@tracker.local', projectIndex: 2 },
+    { name: 'Lead East', email: 'lead.p1@tracker.local', fromProject: 0, toProject: 10 },
+    { name: 'Lead South', email: 'lead.p2@tracker.local', fromProject: 10, toProject: 19 },
+    { name: 'Lead West', email: 'lead.p3@tracker.local', fromProject: 19, toProject: 28 },
   ];
+  const leadPlazaIdx: number[][] = leadDefs.map((lead) =>
+    plazaProjectIdx
+      .map((pi, idx) => (pi >= lead.fromProject && pi < lead.toProject ? idx : -1))
+      .filter((idx) => idx >= 0),
+  );
   const leadIds: string[] = [];
   for (const lead of leadDefs) {
     const user = await db.user.upsert({
@@ -262,9 +219,9 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
   }
 
   // ---- Access ----
-  // Leads: all plazas in own project.
+  // Leads: all plazas in their project slice (thirds of the 28 projects).
   for (let li = 0; li < leadDefs.length; li++) {
-    const ownPlazaIds = plazaIds.slice(leadDefs[li].projectIndex * 10, leadDefs[li].projectIndex * 10 + (leadDefs[li].projectIndex < 2 ? 10 : 8));
+    const ownPlazaIds = leadPlazaIdx[li].map((idx) => plazaIds[idx]);
     await db.userPlazaAccess.deleteMany({ where: { userId: leadIds[li] } });
     await db.userPlazaAccess.createMany({
       data: ownPlazaIds.map((plazaId) => ({ userId: leadIds[li], plazaId })),
@@ -273,17 +230,17 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
   }
 
   // Site users: siteNN (n = 1..23, i = n-1 zero-based) ->
-  // plazas[(i*3)%28, (i*3+1)%28], every 5th (i%5==0) also gets (i*3+2)%28.
+  // plazas[(i*3)%N, (i*3+1)%N], every 5th (i%5==0) also gets (i*3+2)%N.
   const plazaMembers = new Map<string, string[]>(); // plazaId -> member userIds
   for (const pid of plazaIds) plazaMembers.set(pid, []);
   for (let li = 0; li < leadDefs.length; li++) {
-    const ownPlazaIds = plazaIds.slice(leadDefs[li].projectIndex * 10, leadDefs[li].projectIndex * 10 + (leadDefs[li].projectIndex < 2 ? 10 : 8));
+    const ownPlazaIds = leadPlazaIdx[li].map((idx) => plazaIds[idx]);
     for (const pid of ownPlazaIds) plazaMembers.get(pid)!.push(leadIds[li]);
   }
   for (let n = 1; n <= 23; n++) {
     const i = n - 1;
-    const idxs = [(i * 3) % 28, (i * 3 + 1) % 28];
-    if (i % 5 === 0) idxs.push((i * 3 + 2) % 28);
+    const idxs = [(i * 3) % N_PLAZAS, (i * 3 + 1) % N_PLAZAS];
+    if (i % 5 === 0) idxs.push((i * 3 + 2) % N_PLAZAS);
     const mapped = idxs.map((idx) => plazaIds[idx]);
     await db.userPlazaAccess.deleteMany({ where: { userId: siteUserIds[n - 1] } });
     await db.userPlazaAccess.createMany({
@@ -310,7 +267,7 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
   const plazaCursor = new Map<string, number>();
   let created = 0;
   for (let i = 0; i < TASK_TITLES.length; i++) {
-    const plazaId = plazaIds[i % 28];
+    const plazaId = plazaIds[i % N_PLAZAS];
     const title = TASK_TITLES[i];
     if (existingKeys.has(`${plazaId}::${title}`)) continue;
 
@@ -326,7 +283,7 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
       data: {
         plazaId,
         title,
-        description: `Dummy task ${i + 1}/40: ${title} at ${plazaNames[i % 28]} plaza. Seeded for pilot development.`,
+        description: `Seeded sample task ${i + 1}/40: ${title} at ${plazaNames[i % N_PLAZAS]} plaza.`,
         status,
         priority: TASK_PRIORITIES[i % TASK_PRIORITIES.length],
         assigneeId,
@@ -343,7 +300,7 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
         actorId: admin.id,
         type: 'CREATED',
         toStatus: status,
-        text: 'Seeded dummy task',
+        text: 'Seeded sample task',
       },
     });
     if (status !== 'TODO') {
