@@ -1,6 +1,6 @@
 /* Task API verify matrix (T-021/T-022/T-023). Run against dev server :3000. */
 export {};
-const BASE = "http://localhost:3000";
+const BASE = process.env.BASE ?? "http://localhost:3000";
 
 async function login(email: string, password: string): Promise<string> {
   const csrfRes = await fetch(`${BASE}/api/auth/csrf`);
@@ -72,8 +72,8 @@ function check(
 
 async function main() {
   const admin = await login("admin@tracker.local", "Admin@123");
-  const lead = await login("lead.p1@tracker.local", "Lead@123");
-  const site = await login("site05@tracker.local", "Site@123");
+  const lead = await login("m.ravindran@tracker.local", "Tracker@123");
+  const site = await login("sunil.shukla@tracker.local", "Tracker@123");
   console.log("logins ok");
 
   // 0. unauthenticated -> 401

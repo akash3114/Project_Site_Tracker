@@ -1,6 +1,6 @@
 /* Masters API verify matrix (T-012/T-013/T-014). Run against dev server :3300. */
 export {};
-const BASE = "http://localhost:3300";
+const BASE = process.env.BASE ?? "http://localhost:3000";
 
 async function login(email: string, password: string): Promise<string> {
   const csrfRes = await fetch(`${BASE}/api/auth/csrf`);
@@ -56,8 +56,8 @@ async function main() {
   const PROBE_PROJECT = `X-Test-Probe-${SUF}`;
   const PROBE_EMAIL = `qa-probe-${SUF}@tracker.local`;
   const admin = await login("admin@tracker.local", "Admin@123");
-  const lead = await login("lead.p1@tracker.local", "Lead@123");
-  const site = await login("site05@tracker.local", "Site@123");
+  const lead = await login("m.ravindran@tracker.local", "Tracker@123");
+  const site = await login("sunil.shukla@tracker.local", "Tracker@123");
   console.log("logins ok");
 
   // Projects
@@ -78,8 +78,8 @@ async function main() {
   // Plazas
   const plzSite = await req(site, "GET", "/api/plazas");
   const siteCount = asArray(plzSite.json);
-  check("site GET /api/plazas == 2 mapped", siteCount.length === 2 ? 200 : 999, 200, `count=${siteCount.length}`);
-  if (siteCount.length !== 2) process.exitCode = 1;
+  check("site GET /api/plazas == 1 mapped", siteCount.length === 1 ? 200 : 999, 200, `count=${siteCount.length}`);
+  if (siteCount.length !== 1) process.exitCode = 1;
   const plzAdmin = await req(admin, "GET", "/api/plazas");
   check("admin GET /api/plazas", plzAdmin.status, 200);
   const firstPlaza = siteCount[0] as { projectId?: string; project?: { id?: string }; id?: string; name?: string } | undefined;

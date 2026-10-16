@@ -53,8 +53,8 @@ function asArray(j: unknown): unknown[] {
 async function main() {
   const SUF = Date.now().toString(36);
   const admin = await login("admin@tracker.local", "Admin@123");
-  const lead = await login("lead.p1@tracker.local", "Lead@123");
-  const site = await login("site05@tracker.local", "Site@123");
+  const lead = await login("m.ravindran@tracker.local", "Tracker@123");
+  const site = await login("sunil.shukla@tracker.local", "Tracker@123");
   console.log("logins ok");
 
   // ── §1 no-delete guards ──
