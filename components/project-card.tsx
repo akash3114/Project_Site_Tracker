@@ -2,6 +2,8 @@ import { ProgressBar } from "./progress-bar";
 
 export type ProjectCardProps = {
   name: string;
+  acronym?: string | null;
+  state?: string | null;
   status?: string;
   plazaCount: number;
   progressPct: number;
@@ -13,6 +15,8 @@ export type ProjectCardProps = {
 
 export function ProjectCard({
   name,
+  acronym,
+  state,
   status,
   plazaCount,
   progressPct,
@@ -29,11 +33,11 @@ export function ProjectCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="truncate font-display text-base font-semibold tracking-[-0.02em] text-[#17222C]">
-            {name}
+            {acronym ? `${acronym} · ` : ""}{name}
           </h3>
-          {status ? (
-            <p className="mt-0.5 font-mono text-xs text-[#8A97A3]">{status}</p>
-          ) : null}
+          <p className="mt-0.5 font-mono text-xs text-[#8A97A3]">
+            {[state, status].filter(Boolean).join(" · ") || "—"}
+          </p>
         </div>
         {updatedAgo ? (
           <span className="shrink-0 font-mono text-xs text-[#8A97A3]">{updatedAgo}</span>

@@ -1,36 +1,30 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
-import { REAL_PROJECTS } from './real-data';
+import { NHIT_PROJECTS } from './nhit-data';
 
 const db = new PrismaClient();
 
 const hashPw = (s: string) => bcrypt.hash(s, 12);
 
 // ---------------------------------------------------------------------------
-// Masters from project_name_export.xlsx (28 projects / 41 plazas).
-// Corporate Office rows excluded; one cell = one plaza (comma-split only).
-// Chainage/highway/location unknown in source → null.
+// Real masters from docs/NHIT Project List.xlsx (via scripts/parse-nhit.py):
+// 28 projects / 46 plazas. Users generated from manager names.
+// Default password for generated logins: Tracker@123 (distribute + rotate).
 // ---------------------------------------------------------------------------
 
-const PROJECTS = REAL_PROJECTS.map((p) => ({
-  name: p.name,
-  status: 'ACTIVE' as const,
-  description: `${p.company} (${p.code})`,
-}));
+const DEFAULT_PASSWORD = 'Tracker@123';
 
-interface PlazaSeed {
-  projectIndex: number;
-  name: string;
+function slug(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.+|\.+$/g, '')
+    .replace(/\.{2,}/g, '.');
+  return base || 'user';
 }
 
-const PLAZAS: PlazaSeed[] = REAL_PROJECTS.flatMap((p, projectIndex) =>
-  p.plazas.map((name) => ({ projectIndex, name })),
-);
-
-const N_PLAZAS = PLAZAS.length; // 41
-
-// 40 fixed realistic titles: 20 TODO / 10 IN_PROGRESS / 4 BLOCKED / 6 COMPLETED.
+// 40 sample task titles, round-robin over plazas (kept per pilot decision).
 const TASK_TITLES = [
   'Canopy bolt tightening LHS',
   'Toll booth UPS wiring',
@@ -96,7 +90,7 @@ const COMMENT_POOL = [
   'Visited site, work in progress as planned.',
   'Material delivery delayed by a day, catching up.',
   'Verified on ground with shift in-charge.',
-  'Photos uploaded to site register for record.',
+  'Noted in site register for record.',
 ];
 
 function dueDateFor(index: number, now: Date): Date | null {
@@ -106,10 +100,10 @@ function dueDateFor(index: number, now: Date): Date | null {
     d.setUTCHours(0, 0, 0, 0);
     return d;
   };
-  if (index < 10) return atMidnightUTC(now.getTime() - ((index % 7) + 1) * day); // 10 overdue (past 7d)
-  if (index < 25) return atMidnightUTC(now.getTime() + ((index % 7) + 1) * day); // 15 due next 7d
-  if (index % 2 === 0) return null; // rest null...
-  return atMidnightUTC(now.getTime() + (14 + (index % 7)) * day); // ...or future
+  if (index < 10) return atMidnightUTC(now.getTime() - ((index % 7) + 1) * day);
+  if (index < 25) return atMidnightUTC(now.getTime() + ((index % 7) + 1) * day);
+  if (index % 2 === 0) return null;
+  return atMidnightUTC(now.getTime() + (14 + (index % 7)) * day);
 }
 
 async function main(): Promise<{ projects: number; plazas: number; users: number; tasks: number }> {
@@ -125,38 +119,69 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
 
   // ---- Projects (upsert by name) ----
   const projectIds: string[] = [];
-  for (const p of PROJECTS) {
+  for (const p of NHIT_PROJECTS) {
     const project = await db.project.upsert({
       where: { name: p.name },
-      update: { status: p.status, description: p.description },
-      create: { name: p.name, status: p.status, description: p.description },
+      update: {
+        description: p.round,
+        acronym: p.acronym,
+        state: p.state,
+        round: p.round,
+        status: 'ACTIVE',
+      },
+      create: {
+        name: p.name,
+        description: p.round,
+        acronym: p.acronym,
+        state: p.state,
+        round: p.round,
+        status: 'ACTIVE',
+      },
     });
     projectIds.push(project.id);
   }
 
   // ---- Plazas (upsert by [projectId, name]) ----
-  const plazaIds: string[] = []; // flat creation order over PLAZAS (41)
+  const plazaIds: string[] = [];
   const plazaNames: string[] = [];
-  const plazaProjectIdx: number[] = [];
-  for (const pl of PLAZAS) {
+  const flatPlazas: { projectIndex: number; plazaIndex: number }[] = [];
+  NHIT_PROJECTS.forEach((p, projectIndex) => {
+    p.plazas.forEach((z, plazaIndex) => {
+      flatPlazas.push({ projectIndex, plazaIndex });
+      void z;
+    });
+  });
+  for (let i = 0; i < flatPlazas.length; i++) {
+    const { projectIndex, plazaIndex } = flatPlazas[i];
+    const z = NHIT_PROJECTS[projectIndex].plazas[plazaIndex];
     const plaza = await db.plaza.upsert({
-      where: { projectId_name: { projectId: projectIds[pl.projectIndex], name: pl.name } },
-      update: { chainage: null, highway: null, location: null, status: 'ACTIVE' },
-      create: {
-        projectId: projectIds[pl.projectIndex],
-        name: pl.name,
+      where: { projectId_name: { projectId: projectIds[projectIndex], name: z.name } },
+      update: {
+        lengthKm: z.lengthKm,
+        state: z.state,
+        piu: z.piu,
+        ro: z.ro,
         chainage: null,
         highway: null,
         location: null,
         status: 'ACTIVE',
       },
+      create: {
+        projectId: projectIds[projectIndex],
+        name: z.name,
+        lengthKm: z.lengthKm,
+        state: z.state,
+        piu: z.piu,
+        ro: z.ro,
+        status: 'ACTIVE',
+      },
     });
     plazaIds.push(plaza.id);
-    plazaNames.push(pl.name);
-    plazaProjectIdx.push(pl.projectIndex);
+    plazaNames.push(z.name);
   }
+  const N_PLAZAS = plazaIds.length;
 
-  // ---- Users (upsert by email, bcrypt cost 12) ----
+  // ---- Users ----
   const admin = await db.user.upsert({
     where: { email: 'admin@tracker.local' },
     update: { name: 'Tracker Admin', role: 'ADMIN', active: true, passwordHash: await hashPw('Admin@123') },
@@ -169,121 +194,118 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
     },
   });
 
-  const leadDefs = [
-    { name: 'Lead East', email: 'lead.p1@tracker.local', fromProject: 0, toProject: 10 },
-    { name: 'Lead South', email: 'lead.p2@tracker.local', fromProject: 10, toProject: 19 },
-    { name: 'Lead West', email: 'lead.p3@tracker.local', fromProject: 19, toProject: 28 },
-  ];
-  const leadPlazaIdx: number[][] = leadDefs.map((lead) =>
-    plazaProjectIdx
-      .map((pi, idx) => (pi >= lead.fromProject && pi < lead.toProject ? idx : -1))
-      .filter((idx) => idx >= 0),
-  );
-  const leadIds: string[] = [];
-  for (const lead of leadDefs) {
-    const user = await db.user.upsert({
-      where: { email: lead.email },
-      update: { name: lead.name, role: 'PROJECT_LEAD', active: true, passwordHash: await hashPw('Lead@123') },
-      create: {
-        name: lead.name,
-        email: lead.email,
-        passwordHash: await hashPw('Lead@123'),
-        role: 'PROJECT_LEAD',
-        active: true,
-      },
+  // Collect people: name -> { leadProjects: Set<projectIndex>, plazas: Set<flatIdx> }
+  const people = new Map<string, { leadProjects: Set<number>; plazas: Set<number> }>();
+  const touch = (name: string) => {
+    let e = people.get(name);
+    if (!e) {
+      e = { leadProjects: new Set(), plazas: new Set() };
+      people.set(name, e);
+    }
+    return e;
+  };
+  NHIT_PROJECTS.forEach((p, projectIndex) => {
+    for (const pm of p.pms) touch(pm).leadProjects.add(projectIndex);
+    p.plazas.forEach((z, plazaIndex) => {
+      const flatIdx = flatPlazas.findIndex(
+        (f) => f.projectIndex === projectIndex && f.plazaIndex === plazaIndex,
+      );
+      for (const n of [...z.toll, ...z.maintenance, ...z.corridor]) touch(n).plazas.add(flatIdx);
     });
-    leadIds.push(user.id);
-  }
+  });
 
-  const siteUserIds: string[] = [];
-  for (let i = 1; i <= 23; i++) {
-    const nn = String(i).padStart(2, '0');
-    const email = `site${nn}@tracker.local`;
+  // Deterministic emails: slug + collision suffixes.
+  const usedEmails = new Set<string>(['admin@tracker.local']);
+  const emailFor = (name: string) => {
+    const base = `${slug(name)}@tracker.local`;
+    if (!usedEmails.has(base)) {
+      usedEmails.add(base);
+      return base;
+    }
+    let i = 2;
+    while (usedEmails.has(`${slug(name)}.${i}@tracker.local`)) i++;
+    const email = `${slug(name)}.${i}@tracker.local`;
+    usedEmails.add(email);
+    return email;
+  };
+
+  const passwordHash = await hashPw(DEFAULT_PASSWORD);
+  const userIdByName = new Map<string, string>();
+  const sortedNames = Array.from(people.keys()).sort((a, b) => a.localeCompare(b));
+  for (const name of sortedNames) {
+    const info = people.get(name)!;
+    const role = info.leadProjects.size > 0 ? 'PROJECT_LEAD' : 'SITE_USER';
+    const email = emailFor(name);
     const user = await db.user.upsert({
       where: { email },
-      update: {
-        name: `Site User ${nn}`,
-        role: 'SITE_USER',
-        active: true,
-        passwordHash: await hashPw('Site@123'),
-      },
-      create: {
-        name: `Site User ${nn}`,
-        email,
-        passwordHash: await hashPw('Site@123'),
-        role: 'SITE_USER',
-        active: true,
-      },
+      update: { name, role, active: true, passwordHash },
+      create: { name, email, passwordHash, role, active: true },
     });
-    siteUserIds.push(user.id);
+    userIdByName.set(name, user.id);
   }
 
   // ---- Access ----
-  // Leads: all plazas in their project slice (thirds of the 28 projects).
-  for (let li = 0; li < leadDefs.length; li++) {
-    const ownPlazaIds = leadPlazaIdx[li].map((idx) => plazaIds[idx]);
-    await db.userPlazaAccess.deleteMany({ where: { userId: leadIds[li] } });
+  const grant = async (userId: string, flatIdxs: number[]) => {
+    await db.userPlazaAccess.deleteMany({ where: { userId } });
+    if (flatIdxs.length === 0) return;
     await db.userPlazaAccess.createMany({
-      data: ownPlazaIds.map((plazaId) => ({ userId: leadIds[li], plazaId })),
+      data: Array.from(new Set(flatIdxs)).map((idx) => ({ userId, plazaId: plazaIds[idx] })),
       skipDuplicates: true,
     });
+  };
+  // Project-index -> flat plaza indices.
+  const projectFlatIdx = NHIT_PROJECTS.map((_, pi) =>
+    flatPlazas.map((f, idx) => (f.projectIndex === pi ? idx : -1)).filter((idx) => idx >= 0),
+  );
+  for (const name of Array.from(userIdByName.keys())) {
+    const id = userIdByName.get(name)!;
+    const info = people.get(name)!;
+    const idxs = new Set<number>(Array.from(info.plazas));
+    for (const pi of Array.from(info.leadProjects))
+      for (const idx of projectFlatIdx[pi]) idxs.add(idx);
+    await grant(id, Array.from(idxs));
   }
 
-  // Site users: siteNN (n = 1..23, i = n-1 zero-based) ->
-  // plazas[(i*3)%N, (i*3+1)%N], every 5th (i%5==0) also gets (i*3+2)%N.
-  const plazaMembers = new Map<string, string[]>(); // plazaId -> member userIds
-  for (const pid of plazaIds) plazaMembers.set(pid, []);
-  for (let li = 0; li < leadDefs.length; li++) {
-    const ownPlazaIds = leadPlazaIdx[li].map((idx) => plazaIds[idx]);
-    for (const pid of ownPlazaIds) plazaMembers.get(pid)!.push(leadIds[li]);
-  }
-  for (let n = 1; n <= 23; n++) {
-    const i = n - 1;
-    const idxs = [(i * 3) % N_PLAZAS, (i * 3 + 1) % N_PLAZAS];
-    if (i % 5 === 0) idxs.push((i * 3 + 2) % N_PLAZAS);
-    const mapped = idxs.map((idx) => plazaIds[idx]);
-    await db.userPlazaAccess.deleteMany({ where: { userId: siteUserIds[n - 1] } });
-    await db.userPlazaAccess.createMany({
-      data: mapped.map((plazaId) => ({ userId: siteUserIds[n - 1], plazaId })),
-      skipDuplicates: true,
+  // Plaza members for task assignment (prefer toll manager, then others).
+  const plazaMembers = new Map<number, string[]>(); // flatIdx -> userIds, toll-first
+  NHIT_PROJECTS.forEach((p, projectIndex) => {
+    p.plazas.forEach((z, plazaIndex) => {
+      const flatIdx = flatPlazas.findIndex(
+        (f) => f.projectIndex === projectIndex && f.plazaIndex === plazaIndex,
+      );
+      const ordered = [...z.toll, ...z.maintenance, ...z.corridor]
+        .map((n) => userIdByName.get(n))
+        .filter((id): id is string => !!id);
+      plazaMembers.set(
+        flatIdx,
+        Array.from(new Set(ordered)),
+      );
     });
-    for (const pid of mapped) plazaMembers.get(pid)!.push(siteUserIds[n - 1]);
-  }
-
-  // Email lookup for deterministic round-robin assignee order.
-  const memberEmail = new Map<string, string>();
-  const allMemberIds = [...leadIds, ...siteUserIds];
-  const usersForEmail = await db.user.findMany({
-    where: { id: { in: allMemberIds } },
-    select: { id: true, email: true },
   });
-  for (const u of usersForEmail) memberEmail.set(u.id, u.email);
 
-  // ---- Tasks (40, deterministic; only missing plazaId+title pairs are created) ----
+  // ---- Tasks (40 sample, deterministic; only missing plazaId+title pairs created) ----
   const existing = await db.task.findMany({ select: { plazaId: true, title: true } });
   const existingKeys = new Set(existing.map((t) => `${t.plazaId}::${t.title}`));
 
   const now = new Date();
-  const plazaCursor = new Map<string, number>();
-  let created = 0;
+  const plazaCursor = new Map<number, number>();
   for (let i = 0; i < TASK_TITLES.length; i++) {
-    const plazaId = plazaIds[i % N_PLAZAS];
+    const flatIdx = i % N_PLAZAS;
+    const plazaId = plazaIds[flatIdx];
     const title = TASK_TITLES[i];
     if (existingKeys.has(`${plazaId}::${title}`)) continue;
 
-    const members = (plazaMembers.get(plazaId) ?? [])
-      .slice()
-      .sort((a, b) => (memberEmail.get(a) ?? a).localeCompare(memberEmail.get(b) ?? b));
-    const cursor = plazaCursor.get(plazaId) ?? 0;
+    const members = plazaMembers.get(flatIdx) ?? [];
+    const cursor = plazaCursor.get(flatIdx) ?? 0;
     const assigneeId = members.length > 0 ? members[cursor % members.length] : null;
-    plazaCursor.set(plazaId, cursor + 1);
+    plazaCursor.set(flatIdx, cursor + 1);
 
     const status = TASK_STATUSES[i];
     const task = await db.task.create({
       data: {
         plazaId,
         title,
-        description: `Seeded sample task ${i + 1}/40: ${title} at ${plazaNames[i % N_PLAZAS]} plaza.`,
+        description: `Sample task ${i + 1}/40: ${title} at ${plazaNames[flatIdx]} plaza.`,
         status,
         priority: TASK_PRIORITIES[i % TASK_PRIORITIES.length],
         assigneeId,
@@ -292,7 +314,6 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
         completedAt: status === 'COMPLETED' ? now : null,
       },
     });
-    created++;
 
     await db.taskEvent.create({
       data: {
@@ -326,7 +347,6 @@ async function main(): Promise<{ projects: number; plazas: number; users: number
       });
     }
   }
-  void created;
 
   const [projects, plazas, users, tasks] = await Promise.all([
     db.project.count(),

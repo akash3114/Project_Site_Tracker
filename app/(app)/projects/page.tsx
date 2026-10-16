@@ -9,6 +9,8 @@ import type { ProjectSummary } from "@/lib/dashboard";
 function toCard(p: ProjectSummary) {
   return {
     name: p.name,
+    acronym: p.acronym,
+    state: p.state,
     plazaCount: p.plazaCount,
     progressPct: p.progressPct,
     openCount: p.task.total - p.task.completed,

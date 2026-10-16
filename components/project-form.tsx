@@ -7,6 +7,9 @@ import { projectSchema } from "@/lib/validations";
 export type ProjectFormValue = {
   name: string;
   description?: string;
+  acronym?: string;
+  state?: string;
+  round?: string;
   status?: "ACTIVE" | "ON_HOLD" | "COMPLETED";
 };
 
@@ -33,6 +36,9 @@ export function ProjectForm({
 }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [acronym, setAcronym] = useState(initial?.acronym ?? "");
+  const [state, setState] = useState(initial?.state ?? "");
+  const [round, setRound] = useState(initial?.round ?? "");
   const [status, setStatus] = useState<ProjectFormValue["status"]>(
     initial?.status ?? "ACTIVE",
   );
@@ -40,9 +46,13 @@ export function ProjectForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const opt = (v: string) => (v.trim() ? v.trim() : undefined);
     const parsed = projectSchema.safeParse({
       name: name.trim(),
-      description: description.trim() ? description.trim() : undefined,
+      description: opt(description),
+      acronym: opt(acronym),
+      state: opt(state),
+      round: opt(round),
       status,
     });
     if (!parsed.success) {
@@ -53,6 +63,9 @@ export function ProjectForm({
     await onSubmit({
       name: parsed.data.name,
       description: parsed.data.description,
+      acronym: parsed.data.acronym,
+      state: parsed.data.state,
+      round: parsed.data.round,
       status: parsed.data.status,
     });
   }
@@ -84,6 +97,38 @@ export function ProjectForm({
           maxLength={2000}
         />
       </label>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          Acronym
+          <input
+            className={inputCls}
+            value={acronym}
+            onChange={(e) => setAcronym(e.target.value)}
+            placeholder="RKJL"
+            maxLength={20}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          State
+          <input
+            className={inputCls}
+            value={state}
+            onChange={(e) => setState(e.target.value)}
+            placeholder="Madhya Pradesh"
+            maxLength={100}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          Round
+          <input
+            className={inputCls}
+            value={round}
+            onChange={(e) => setRound(e.target.value)}
+            placeholder="Round 3"
+            maxLength={50}
+          />
+        </label>
+      </div>
       <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
         Status
         <select

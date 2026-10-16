@@ -11,6 +11,9 @@ type ProjectDetail = {
   id: string;
   name: string;
   description?: string | null;
+  acronym?: string | null;
+  state?: string | null;
+  round?: string | null;
   status: string;
   plazaCount: number;
   task: { total: number; completed: number; blocked: number; overdue: number };
@@ -22,10 +25,22 @@ type PlazaRow = {
   name: string;
   chainage?: string | null;
   highway?: string | null;
+  lengthKm?: number | null;
+  state?: string | null;
+  piu?: string | null;
+  ro?: string | null;
   status: string;
   task: { total: number; completed: number; blocked: number; overdue: number };
   progressPct: number;
 };
+
+function plazaRowMeta(z: PlazaRow): string {
+  const parts: string[] = [];
+  if (z.state) parts.push(z.state);
+  if (typeof z.lengthKm === "number") parts.push(`${z.lengthKm} km`);
+  if (z.piu) parts.push(`PIU ${z.piu}`);
+  return parts.join(" · ");
+}
 
 /** Project detail (T-031): header + plaza health list → /plazas/[id]. */
 export default function ProjectPage() {
@@ -97,8 +112,11 @@ export default function ProjectPage() {
             <>
               <div>
                 <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#0E121B]">
-                  {project.name}
+                  {project.acronym ? `${project.acronym} · ` : ""}{project.name}
                 </h1>
+                <p className="font-mono text-xs text-[#8A97A3]">
+                  {[project.state, project.round, project.status].filter(Boolean).join(" · ")}
+                </p>
                 {project.description ? (
                   <p className="font-body text-sm text-[#5C6F7E]">{project.description}</p>
                 ) : null}
@@ -122,8 +140,8 @@ export default function ProjectPage() {
                       <span className="font-display text-base font-semibold text-[#0E121B]">
                         {z.name}
                       </span>
-                      {z.chainage ? (
-                        <span className="font-mono text-xs text-[#8A97A3]">{z.chainage}</span>
+                      {plazaRowMeta(z) ? (
+                        <span className="font-mono text-xs text-[#8A97A3]">{plazaRowMeta(z)}</span>
                       ) : null}
                       <span className="ml-auto font-mono text-xs text-[#5C6F7E]">
                         {z.task.completed}/{z.task.total}

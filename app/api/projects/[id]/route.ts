@@ -31,6 +31,9 @@ export async function GET(_req: Request, { params }: Ctx) {
     id: project.id,
     name: project.name,
     description: project.description,
+    acronym: project.acronym,
+    state: project.state,
+    round: project.round,
     status: project.status,
     plazaCount: s.plazaCount,
     task: {

@@ -27,6 +27,9 @@ export async function GET() {
         id: p.id,
         name: p.name,
         description: p.description,
+        acronym: p.acronym,
+        state: p.state,
+        round: p.round,
         status: p.status,
         plazaCount: s.plazaCount,
         task: {
@@ -73,6 +76,9 @@ export async function POST(req: Request) {
       data: {
         name: parsed.data.name,
         description: parsed.data.description,
+        acronym: parsed.data.acronym,
+        state: parsed.data.state,
+        round: parsed.data.round,
         status: parsed.data.status ?? "ACTIVE",
         createdById: user.id,
       },

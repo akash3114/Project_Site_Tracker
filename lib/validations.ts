@@ -10,8 +10,14 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export const projectSchema = z.object({
   name: z.string().min(3).max(150),
   description: z.string().max(2000).optional(),
+  acronym: z.string().max(20).optional(),
+  state: z.string().max(100).optional(),
+  round: z.string().max(50).optional(),
   status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED"]).optional(),
 });
+
+const emptyToUndefinedNumber = (v: unknown) =>
+  v === "" || v === null || v === undefined ? undefined : v;
 
 export const plazaSchema = z.object({
   projectId: z.string().cuid(),
@@ -19,6 +25,10 @@ export const plazaSchema = z.object({
   chainage: z.string().max(50).optional(),
   highway: z.string().max(50).optional(),
   location: z.string().max(150).optional(),
+  lengthKm: z.preprocess(emptyToUndefinedNumber, z.coerce.number().positive().max(100000).optional()),
+  state: z.string().max(100).optional(),
+  piu: z.string().max(150).optional(),
+  ro: z.string().max(150).optional(),
   status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED"]).optional(),
 });
 

@@ -13,6 +13,9 @@ export type SpotlightStatus = "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
 export interface ProjectSummary {
   id: string;
   name: string;
+  acronym?: string | null;
+  state?: string | null;
+  round?: string | null;
   status: ProjectStatus;
   plazaCount: number;
   task: { total: number; completed: number; blocked: number; overdue: number };
@@ -25,7 +28,14 @@ export interface SpotlightTask {
   status: SpotlightStatus;
   priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   dueDate: string | null;
-  plaza: { id: string; name: string; chainage: string | null; projectName: string };
+  plaza: {
+    id: string;
+    name: string;
+    chainage?: string | null;
+    lengthKm?: number | null;
+    state?: string | null;
+    projectName: string;
+  };
   assignee: { name: string } | null;
 }
 

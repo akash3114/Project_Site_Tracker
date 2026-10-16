@@ -11,6 +11,10 @@ type PlazaItem = {
   chainage: string | null;
   highway: string | null;
   location: string | null;
+  lengthKm: number | null;
+  state: string | null;
+  piu: string | null;
+  ro: string | null;
   status: string;
   task: { total: number; completed: number; blocked: number; overdue: number };
   progressPct: number;
@@ -41,6 +45,10 @@ const emptyForm = {
   chainage: "",
   highway: "",
   location: "",
+  lengthKm: "",
+  state: "",
+  piu: "",
+  ro: "",
   status: "ACTIVE",
 };
 
@@ -102,6 +110,14 @@ export function PlazasManager() {
       setFormError("Pick a project");
       return;
     }
+    let lengthKm: number | undefined;
+    if (form.lengthKm.trim()) {
+      lengthKm = Number(form.lengthKm.trim());
+      if (!Number.isFinite(lengthKm) || lengthKm <= 0) {
+        setFormError("Length must be a positive number (km)");
+        return;
+      }
+    }
     setSaving(true);
     setFormError(null);
     try {
@@ -111,11 +127,15 @@ export function PlazasManager() {
         body: JSON.stringify({
           projectId: form.projectId,
           status: form.status,
+          ...(lengthKm !== undefined ? { lengthKm } : null),
           ...clean({
             name: form.name,
             chainage: form.chainage,
             highway: form.highway,
             location: form.location,
+            state: form.state,
+            piu: form.piu,
+            ro: form.ro,
           }),
         }),
       });
@@ -242,6 +262,43 @@ export function PlazasManager() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+            Length (km)
+            <input
+              className={inputCls}
+              value={form.lengthKm}
+              onChange={(e) => setForm({ ...form, lengthKm: e.target.value })}
+              placeholder="81.7"
+              inputMode="decimal"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+            State
+            <input
+              className={inputCls}
+              value={form.state}
+              onChange={(e) => setForm({ ...form, state: e.target.value })}
+              placeholder="Madhya Pradesh"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+            PIU
+            <input
+              className={inputCls}
+              value={form.piu}
+              onChange={(e) => setForm({ ...form, piu: e.target.value })}
+              placeholder="Jabalpur"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+            RO
+            <input
+              className={inputCls}
+              value={form.ro}
+              onChange={(e) => setForm({ ...form, ro: e.target.value })}
+              placeholder="Bhopal"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
             Status
             <select
               className={inputCls}
@@ -292,6 +349,8 @@ export function PlazasManager() {
               <tr className="border-b border-[rgba(23,34,44,0.08)] bg-[#FAFBFC]">
                 <th className={thCls}>Plaza</th>
                 <th className={thCls}>Project</th>
+                <th className={thCls}>Length</th>
+                <th className={thCls}>State</th>
                 <th className={thCls}>Status</th>
                 <th className={thCls}>Tasks</th>
                 <th className={thCls}>Done</th>
@@ -321,6 +380,10 @@ export function PlazasManager() {
                     )}
                   </td>
                   <td className={tdCls}>{z.project?.name ?? z.projectId}</td>
+                  <td className={tdCls}>
+                    {typeof z.lengthKm === "number" ? `${z.lengthKm} km` : "—"}
+                  </td>
+                  <td className={tdCls}>{z.state ?? "—"}</td>
                   <td className={tdCls}>
                     {editingId === z.id ? (
                       <select

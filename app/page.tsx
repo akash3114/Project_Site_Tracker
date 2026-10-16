@@ -329,6 +329,8 @@ export default function Home() {
                       <a key={p.id} href={`/projects/${p.id}`} className="block">
                         <ProjectCard
                           name={p.name}
+                          acronym={p.acronym}
+                          state={p.state}
                           status={p.status}
                           plazaCount={p.plazaCount}
                           progressPct={p.progressPct}

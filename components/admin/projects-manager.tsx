@@ -8,6 +8,9 @@ type ProjectItem = {
   id: string;
   name: string;
   description: string | null;
+  acronym: string | null;
+  state: string | null;
+  round: string | null;
   status: string;
   plazaCount: number;
   task: { total: number; completed: number; blocked: number; overdue: number };
@@ -136,6 +139,9 @@ export function ProjectsManager() {
             initial={{
               name: editing.name,
               description: editing.description ?? undefined,
+              acronym: editing.acronym ?? undefined,
+              state: editing.state ?? undefined,
+              round: editing.round ?? undefined,
               status: editing.status as ProjectFormValue["status"],
             }}
             submitLabel="Save changes"
@@ -159,6 +165,8 @@ export function ProjectsManager() {
             <thead>
               <tr className="border-b border-[rgba(23,34,44,0.08)] bg-[#FAFBFC]">
                 <th className={thCls}>Name</th>
+                <th className={thCls}>Acronym</th>
+                <th className={thCls}>State</th>
                 <th className={thCls}>Status</th>
                 <th className={thCls}>Plazas</th>
                 <th className={thCls}>Tasks</th>
@@ -178,6 +186,8 @@ export function ProjectsManager() {
                   className="border-b border-[rgba(23,34,44,0.06)] last:border-0"
                 >
                   <td className={`${tdCls} font-medium`}>{p.name}</td>
+                  <td className={tdCls}>{p.acronym ?? "—"}</td>
+                  <td className={tdCls}>{p.state ?? "—"}</td>
                   <td className={tdCls}>{p.status}</td>
                   <td className={tdCls}>{p.plazaCount}</td>
                   <td className={tdCls}>{p.task.total}</td>

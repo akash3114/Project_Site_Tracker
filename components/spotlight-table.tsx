@@ -18,7 +18,7 @@ export function SpotlightTable({ tasks }: { tasks: SpotlightTask[] }) {
             <th scope="col" className="p-4 font-medium">Status</th>
             <th scope="col" className="p-4 font-medium">Task</th>
             <th scope="col" className="p-4 font-medium">Plaza</th>
-            <th scope="col" className="p-4 font-medium">Chainage</th>
+            <th scope="col" className="p-4 font-medium">Length</th>
             <th scope="col" className="p-4 font-medium">Due</th>
           </tr>
         </thead>
@@ -42,7 +42,9 @@ export function SpotlightTable({ tasks }: { tasks: SpotlightTask[] }) {
                 </td>
                 <td className="p-4 text-[#17222C]">{task.plaza.name}</td>
                 <td className="p-4 font-mono text-xs text-[#5C6F7E]">
-                  {task.plaza.chainage ?? "—"}
+                  {typeof task.plaza.lengthKm === "number"
+                    ? `${task.plaza.lengthKm} km`
+                    : (task.plaza.chainage ?? "—")}
                 </td>
                 <td
                   className={`p-4 font-mono text-xs ${overdue ? "font-medium text-[#DC2626]" : "text-[#5C6F7E]"}`}

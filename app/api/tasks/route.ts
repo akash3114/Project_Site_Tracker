@@ -25,7 +25,9 @@ const taskInclude = {
     select: {
       id: true,
       name: true,
-      project: { select: { id: true, name: true } },
+      lengthKm: true,
+      state: true,
+      project: { select: { id: true, name: true, acronym: true, state: true } },
     },
   },
   assignee: { select: { id: true, name: true } },

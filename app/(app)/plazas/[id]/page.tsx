@@ -24,12 +24,26 @@ type PlazaDetail = {
   chainage?: string | null;
   highway?: string | null;
   location?: string | null;
+  lengthKm?: number | null;
+  state?: string | null;
+  piu?: string | null;
+  ro?: string | null;
   status?: string;
   project?: { id: string; name: string } | null;
   projectId?: string;
   task?: { total: number; completed: number; blocked: number; overdue: number };
   progressPct?: number;
 };
+
+function plazaMeta(plaza: PlazaDetail): string {
+  const parts: string[] = [];
+  if (plaza.project?.name) parts.push(plaza.project.name);
+  if (plaza.state) parts.push(plaza.state);
+  if (typeof plaza.lengthKm === "number") parts.push(`${plaza.lengthKm} km`);
+  if (plaza.piu) parts.push(`PIU ${plaza.piu}`);
+  if (plaza.ro) parts.push(`RO ${plaza.ro}`);
+  return parts.join(" · ");
+}
 
 function useDebounced(value: string, ms: number) {
   const [debounced, setDebounced] = useState(value);
@@ -301,9 +315,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                     {plaza?.name ?? "Loading…"}
                   </h1>
                   <p className="font-body text-sm text-[#5C6F7E]">
-                    {plaza
-                      ? `${plaza.project?.name ?? ""} · ${plaza.chainage ?? plaza.location ?? ""}`
-                      : "Loading plaza…"}
+                    {plaza ? plazaMeta(plaza) || "Loading plaza…" : "Loading plaza…"}
                   </p>
                 </div>
                 <div className="ml-auto flex items-center gap-2">

@@ -35,6 +35,9 @@ model Project {
   id          String       @id @default(cuid())
   name        String       @unique
   description String?
+  acronym     String?
+  state       String?
+  round       String?
   status      MasterStatus @default(ACTIVE)
   plazas      Plaza[]
   createdById String?
@@ -58,6 +61,10 @@ model Plaza {
   chainage  String?
   highway   String?
   location  String?
+  lengthKm  Float?
+  state     String?
+  piu       String?
+  ro        String?
   status    MasterStatus @default(ACTIVE)
   accesses  UserPlazaAccess[]
   tasks     Task[]
