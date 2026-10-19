@@ -87,10 +87,6 @@ async function loadAllTasks(): Promise<DashboardTask[]> {
   return [first, ...rest].flatMap((page) => page.items);
 }
 
-function roundKey(value?: string | null): RoundKey | null {
-  return value && value in ROUND_LABELS ? (value as RoundKey) : null;
-}
-
 function PageFrame({ children }: { children: React.ReactNode }) {
   return <main className="cockpit-main">{children}</main>;
 }
@@ -204,22 +200,26 @@ function StatusLegend() {
 }
 
 function ProjectRow({ project }: { project: ProjectSummary }) {
-  const round = roundKey(project.round);
   const total = project.task.total;
   const done = project.task.completed;
   const percent = total ? Math.round((done / total) * 100) : 0;
+  const acronym = project.acronym?.trim();
+  const roundLabel =
+    project.round && project.round in ROUND_LABELS
+      ? ROUND_LABELS[project.round as RoundKey]
+      : null;
   return (
     <Link
       href={`/projects/${project.id}`}
       className="cockpit-project-row"
       role="row"
-      aria-label={`${project.name}, ${project.plazaCount} plaza sites, ${done} of ${total} tasks completed, ${project.task.overdue} overdue, ${project.task.blocked} blocked`}
+      aria-label={`${project.name}${acronym ? ` (${acronym})` : ""}, ${project.plazaCount} plaza sites${roundLabel ? `, ${roundLabel}` : ""}, ${done} of ${total} tasks completed, ${project.task.overdue} overdue, ${project.task.blocked} blocked`}
     >
       <span className="project-title-cell" role="cell">
-        <span className="round-tag">{round ? `R${round.slice(-1)}` : "—"}</span>
+        <span className="project-acronym-tag">{acronym || "—"}</span>
         <span className="project-title-wrap">
           <strong title={project.name}>{project.name}</strong>
-          <small>{project.acronym ? `${project.acronym} · ` : ""}{project.plazaCount} plaza sites</small>
+          <small>{project.plazaCount} plaza sites{roundLabel ? ` · ${roundLabel}` : ""}</small>
         </span>
       </span>
       <span className="project-progress-cell" role="cell" aria-label={`${done} of ${total} tasks completed`}>
