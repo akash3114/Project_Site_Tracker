@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { TaskDrawer } from "@/components/task-drawer";
-import { NewTaskDialog } from "@/components/new-task-dialog";
 import { PageHeader } from "@/components/page-header";
 import type { AssigneeOption } from "@/components/task-filters";
 import type { PlazaTaskItem } from "@/components/task-table";
@@ -336,7 +335,13 @@ function AttentionPanel({ tasks, overdue, blocked }: { tasks: DashboardTask[]; o
   );
 }
 
-function TaskCreateAction({
+/**
+ * Inline task composer. Replaces the old button → plaza picker → dialog trio:
+ * every field the API accepts sits on one bar and posts straight to
+ * POST /api/tasks. Owners belong to a plaza, so they load on demand and are
+ * cached per plaza for the session.
+ */
+function TaskComposer({
   plazas,
   tasks,
   onCreated,
@@ -345,87 +350,147 @@ function TaskCreateAction({
   tasks: DashboardTask[];
   onCreated: () => void;
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [selectedPlaza, setSelectedPlaza] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [plazaId, setPlazaId] = useState("");
+  const [title, setTitle] = useState("");
+  const [priority, setPriority] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [assigneeId, setAssigneeId] = useState("");
   const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
+  const assigneeCache = useRef(new Map<string, AssigneeOption[]>());
 
-  const openForPlaza = useCallback(async (plazaId: string) => {
-    setBusy(true);
-    setError(null);
-    const seen = new Map<string, string>();
-    for (const task of tasks) {
-      if (task.plaza?.id === plazaId && task.assignee?.id) seen.set(task.assignee.id, task.assignee.name);
-    }
-    try {
-      const users = await apiJson<{ id: string; name: string; active?: boolean; plazaIds?: string[] }[]>("/api/users");
-      for (const user of users) {
-        if (user.active !== false && user.plazaIds?.includes(plazaId)) seen.set(user.id, user.name);
-      }
-    } catch {
-      // Manager accounts cannot browse the user directory; use visible task owners.
-    }
-    setAssignees(Array.from(seen, ([id, name]) => ({ id, name })));
-    setSelectedPlaza(plazaId);
-    setPickerOpen(false);
-    setDialogOpen(true);
-    setBusy(false);
-  }, [tasks]);
+  // A single-plaza scope preselects itself so the bar posts in one move.
+  useEffect(() => {
+    if (plazas.length === 1 && plazaId !== plazas[0].id) setPlazaId(plazas[0].id);
+  }, [plazas, plazaId]);
 
   useEffect(() => {
-    if (!pickerOpen && !dialogOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPickerOpen(false);
-        setDialogOpen(false);
+    if (!plazaId) {
+      setAssignees([]);
+      return;
+    }
+    const cached = assigneeCache.current.get(plazaId);
+    if (cached) {
+      setAssignees(cached);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const seen = new Map<string, string>();
+      for (const task of tasks) {
+        if (task.plaza?.id === plazaId && task.assignee?.id) seen.set(task.assignee.id, task.assignee.name);
       }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pickerOpen, dialogOpen]);
+      try {
+        const users = await apiJson<{ id: string; name: string; active?: boolean; plazaIds?: string[] }[]>("/api/users");
+        for (const user of users) {
+          if (user.active !== false && user.plazaIds?.includes(plazaId)) seen.set(user.id, user.name);
+        }
+      } catch {
+        // Manager accounts cannot browse the user directory; use visible task owners.
+      }
+      const list = Array.from(seen, ([id, name]) => ({ id, name }));
+      assigneeCache.current.set(plazaId, list);
+      if (!cancelled) setAssignees(list);
+    })();
+    return () => { cancelled = true; };
+  }, [plazaId, tasks]);
+
+  // The success line is a receipt, not a log — retire it on its own.
+  useEffect(() => {
+    if (alert?.tone !== "ok") return;
+    const timer = window.setTimeout(() => setAlert(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [alert]);
+
+  const ready = plazaId !== "" && title.trim().length >= 3 && !saving;
+  const submitHint = !plazaId
+    ? "Choose a plaza first"
+    : title.trim().length < 3
+      ? "A task title needs at least 3 characters"
+      : "Create task";
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ready) return;
+    const cleanTitle = title.trim();
+    setSaving(true);
+    setAlert(null);
+    const body: Record<string, unknown> = { plazaId, title: cleanTitle };
+    if (priority) body.priority = priority;
+    if (dueDate) body.dueDate = dueDate;
+    if (assigneeId) body.assigneeId = assigneeId;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setAlert({ tone: "error", text: (data as { error?: string } | null)?.error ?? `Create failed (${res.status})` });
+        return;
+      }
+      setTitle("");
+      setPriority("");
+      setDueDate("");
+      setAssigneeId("");
+      setAlert({ tone: "ok", text: `Added “${cleanTitle}”.` });
+      onCreated();
+    } catch {
+      setAlert({ tone: "error", text: "Network error creating task" });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <>
-      <button type="button" className="cockpit-primary-button" onClick={() => {
-        setError(null);
-        if (plazas.length === 1) void openForPlaza(plazas[0].id);
-        else setPickerOpen(true);
-      }} disabled={plazas.length === 0 || busy}>
-        + New task
-      </button>
-      {error ? <span role="alert" className="cockpit-inline-error">{error}</span> : null}
-      {pickerOpen ? (
-        <div className="cockpit-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false); }}>
-          <section className="cockpit-picker" role="dialog" aria-modal="true" aria-labelledby="plaza-picker-title">
-            <h2 id="plaza-picker-title">Choose a plaza</h2>
-            <p>Select the site where this task belongs.</p>
-            <label htmlFor="task-plaza-picker">Plaza</label>
-            <select id="task-plaza-picker" autoFocus value={selectedPlaza} onChange={(event) => setSelectedPlaza(event.target.value)}>
-              <option value="">Select a plaza</option>
-              {plazas.map((plaza) => <option key={plaza.id} value={plaza.id}>{plaza.name}{plaza.project?.name ? ` — ${plaza.project.name}` : ""}</option>)}
-            </select>
-            {error ? <p role="alert" className="cockpit-inline-error">{error}</p> : null}
-            <div className="picker-actions">
-              <button type="button" className="cockpit-secondary-button" onClick={() => setPickerOpen(false)}>Cancel</button>
-              <button type="button" className="cockpit-primary-button" disabled={!selectedPlaza || busy} onClick={() => void openForPlaza(selectedPlaza)}>{busy ? "Loading…" : "Continue"}</button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-      {dialogOpen && selectedPlaza ? (
-        <NewTaskDialog
-          key={selectedPlaza}
-          plazaId={selectedPlaza}
-          assignees={assignees}
-          open={dialogOpen}
-          onClose={() => { setDialogOpen(false); setError(null); }}
-          onCreated={() => { setDialogOpen(false); setError(null); onCreated(); }}
-          onError={setError}
+    <form className="cockpit-composer-form" onSubmit={submit} aria-label="New task">
+      <div className="cockpit-composer">
+        <select
+          className="cockpit-composer-plaza"
+          aria-label="Plaza"
+          value={plazaId}
+          disabled={plazas.length === 0}
+          onChange={(event) => { setPlazaId(event.target.value); setAssigneeId(""); }}
+        >
+          <option value="">Toll plaza</option>
+          {plazas.map((plaza) => <option key={plaza.id} value={plaza.id}>{plaza.name}{plaza.project?.name ? ` — ${plaza.project.name}` : ""}</option>)}
+        </select>
+        <input
+          className="cockpit-composer-title"
+          aria-label="Task title"
+          placeholder="Task title"
+          maxLength={200}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
         />
-      ) : null}
-    </>
+        <select className="cockpit-composer-priority" aria-label="Priority" value={priority} onChange={(event) => setPriority(event.target.value)}>
+          <option value="">Priority</option>
+          {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((p) => <option key={p} value={p}>{p[0] + p.slice(1).toLowerCase()}</option>)}
+        </select>
+        <input
+          className="cockpit-composer-date"
+          type="date"
+          aria-label="Due date"
+          value={dueDate}
+          onChange={(event) => setDueDate(event.target.value)}
+        />
+        <select
+          className="cockpit-composer-assignee"
+          aria-label="Assignee"
+          value={assigneeId}
+          disabled={!plazaId}
+          onChange={(event) => setAssigneeId(event.target.value)}
+        >
+          <option value="">Assignee</option>
+          {assignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <button type="submit" className="cockpit-composer-submit" disabled={!ready} aria-label="Create task" title={submitHint}>+</button>
+      </div>
+      {alert ? <p className="cockpit-composer-alert" data-tone={alert.tone} role={alert.tone === "error" ? "alert" : "status"}>{alert.text}</p> : null}
+    </form>
   );
 }
 
@@ -484,13 +549,10 @@ function ManagementDashboard() {
         overline={`All projects · ${roundScopeLabel(snapshot?.rounds)}`}
         title="Delivery overview"
         subtitle="Live status across every project and plaza, with exceptions surfaced first."
-        action={
-          <>
-            <span className="cockpit-live"><i aria-hidden="true" />Live · updated {updatedAt ? updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
-            {!loading && !error ? <TaskCreateAction plazas={plazas} tasks={attention} onCreated={() => void load()} /> : null}
-          </>
-        }
+        action={<span className="cockpit-live"><i aria-hidden="true" />Live · updated {updatedAt ? updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>}
       />
+
+      {plazas.length > 0 ? <TaskComposer plazas={plazas} tasks={attention} onCreated={() => void load()} /> : null}
 
       {loading ? <div className="cockpit-loading" aria-label="Loading portfolio" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
         <>
@@ -583,8 +645,9 @@ function ManagerWorkbench() {
         overline="Assigned scope · Projects and plazas"
         title="Your workbench"
         subtitle="Tasks and site health across everything assigned to you."
-        action={!loading && !error ? <TaskCreateAction plazas={plazas} tasks={tasks} onCreated={() => void load()} /> : null}
       />
+
+      {plazas.length > 0 ? <TaskComposer plazas={plazas} tasks={tasks} onCreated={() => void load()} /> : null}
 
       {loading ? <div className="cockpit-loading" aria-label="Loading assigned work" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
         <>

@@ -312,6 +312,81 @@
   background: #4c7a41;
   box-shadow: 0 0 0 3px #4c7a4122;
 }
+.cockpit-composer-form {
+  margin-bottom: 14px;
+}
+.cockpit-composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #9eada2;
+  background: #fff;
+}
+.cockpit-composer select,
+.cockpit-composer input {
+  min-width: 0;
+  height: 44px;
+  padding: 0 9px;
+  border: 1px solid #cdd6ce;
+  border-radius: 0;
+  background: #fff;
+  color: var(--c-ink);
+  font-size: 12px;
+}
+.cockpit-composer select:focus-visible,
+.cockpit-composer input:focus-visible {
+  outline: 2px solid var(--c-forest);
+  outline-offset: -1px;
+}
+.cockpit-composer-plaza {
+  flex: 0 1 186px;
+}
+.cockpit-composer-title {
+  flex: 1 1 220px;
+}
+.cockpit-composer-priority {
+  flex: 0 1 112px;
+}
+.cockpit-composer-date {
+  flex: 0 1 146px;
+}
+.cockpit-composer-assignee {
+  flex: 0 1 178px;
+}
+.cockpit-composer-submit {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 1px solid transparent;
+  background: var(--c-lime);
+  color: var(--c-deep);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 150ms ease-out, opacity 150ms ease-out;
+}
+.cockpit-composer-submit:hover {
+  background: #d8ee9b;
+}
+.cockpit-composer-submit:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+.cockpit-composer-alert {
+  margin: 6px 0 0;
+  color: var(--c-muted);
+  font-size: 11px;
+}
+.cockpit-composer-alert[data-tone="error"] {
+  color: var(--c-red);
+}
 .cockpit-primary-button,
 .cockpit-secondary-button {
   display: inline-flex;
@@ -342,10 +417,6 @@
 }
 .cockpit-secondary-button:hover {
   border-color: var(--c-forest);
-}
-.cockpit-inline-error {
-  color: var(--c-red);
-  font-size: 11px;
 }
 .cockpit-metrics {
   display: grid;
@@ -597,16 +668,14 @@
   align-items: center;
   gap: 6px;
 }
-.cockpit-filters label,
-.cockpit-picker label {
+.cockpit-filters label {
   color: var(--c-muted);
   font-size: 10px;
   font-weight: 700;
 }
 .cockpit-filters select,
 .cockpit-filters input,
-.cockpit-manager-controls input,
-.cockpit-picker select {
+.cockpit-manager-controls input {
   min-width: 0;
   height: 44px;
   padding: 0 8px;
@@ -1074,48 +1143,6 @@
 @keyframes cockpit-shimmer {
   to { background-position-x: -220%; }
 }
-.cockpit-modal-backdrop {
-  position: fixed;
-  z-index: 50;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgb(16 45 39 / 48%);
-}
-.cockpit-picker {
-  display: flex;
-  width: min(100%, 460px);
-  flex-direction: column;
-  gap: 10px;
-  padding: 20px;
-  border: 1px solid var(--c-rule);
-  background: var(--c-paper);
-  box-shadow: 0 12px 36px rgb(16 45 39 / 20%);
-}
-.cockpit-picker h2 {
-  margin: 0;
-  color: var(--c-deep);
-  font-family: var(--font-display), Arial, sans-serif;
-  font-size: 18px;
-}
-.cockpit-picker p {
-  margin: 0;
-  color: var(--c-muted);
-  font-size: 12px;
-}
-.cockpit-picker select {
-  width: 100%;
-  height: 44px;
-}
-.picker-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-
 @media (max-width: 1100px) {
   .cockpit-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1201,6 +1228,18 @@
   .cockpit-title-actions {
     width: 100%;
     justify-content: space-between;
+  }
+  .cockpit-composer-plaza,
+  .cockpit-composer-title,
+  .cockpit-composer-priority,
+  .cockpit-composer-date,
+  .cockpit-composer-assignee {
+    flex: 1 1 100%;
+  }
+  .cockpit-composer-submit {
+    width: auto;
+    flex: 1 1 100%;
+    margin-left: 0;
   }
   .cockpit-metrics,
   .manager-metrics {
