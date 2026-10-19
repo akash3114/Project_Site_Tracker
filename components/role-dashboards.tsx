@@ -294,7 +294,7 @@ function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
           {groups.map((group) => (
             <div className="cockpit-project-group-body" key={group.key}>
               <div className="cockpit-project-group" role="row">
-                <span role="cell" aria-colspan={4}>
+                <span role="cell" aria-colspan={4} className="cockpit-project-group-label">
                   <strong>{group.label}</strong>
                   <small>{group.projects.length} {group.projects.length === 1 ? "project" : "projects"}</small>
                 </span>

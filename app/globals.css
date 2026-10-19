@@ -654,23 +654,48 @@
 }
 .cockpit-project-group {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 12px 0 4px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0 6px;
+  border-top: 1px solid #dbe3d7;
   color: var(--c-forest);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: .06em;
+  letter-spacing: .07em;
   text-transform: uppercase;
 }
 .cockpit-project-group-body:first-child .cockpit-project-group {
   padding-top: 4px;
+  border-top: 0;
+}
+.cockpit-project-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.cockpit-project-group strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.cockpit-project-group strong::before {
+  content: "";
+  display: block;
+  width: 3px;
+  height: 11px;
+  background: var(--c-forest);
 }
 .cockpit-project-group small {
-  color: var(--c-quiet);
+  display: inline-block;
+  padding: 2px 7px;
+  border: 1px solid #dbe3d7;
+  background: #eef3ea;
+  color: #46584e;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .04em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .03em;
+  line-height: 1.45;
 }
 .cockpit-project-group-body [role="rowgroup"] .cockpit-project-row:nth-child(odd) {
   background: #fafbf8;
