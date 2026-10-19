@@ -6,36 +6,64 @@
 - Outbound internet for pulls (app stays internal)
 
 ## Files
-- `docker/compose.yml` — prod: `db` (postgres:16-alpine, `pgdata`, `pg_isready` healthcheck) + `app` (Next.js standalone, `depends_on db healthy`, runs `prisma migrate deploy && node server.js`) + `caddy` (reverse_proxy `app:3000`)
+- `docker/compose.yml` — prod stack:
+  - `db` — postgres:16-alpine, `pgdata` volume, `pg_isready` healthcheck
+  - `migrate` — one-shot `tools` image; runs `prisma migrate deploy` then exits; `app` waits on it (`service_completed_successfully`)
+  - `app` — lean Next.js standalone server (`node server.js`); `depends_on db healthy`
+  - `caddy` — `reverse_proxy app:3000`
 - `docker/compose.dev.yml` — local dev: `db` only
 - `docker/Caddyfile` — `{$CADDY_DOMAIN:localhost} { reverse_proxy app:3000 }`
-- `.env` — NEVER commit; prod values live only on VM (see `.env.example` for keys: `POSTGRES_*, DATABASE_URL, AUTH_SECRET, NEXTAUTH_URL, CADDY_DOMAIN, SEED_ADMIN_*`)
-- Prisma pinned to **v6** (`prisma@6` + `@prisma/client@6`). Do NOT `npm install prisma@latest` (v8 RC breaks `validate`/`migrate dev` workflow).
+- `.env` — NEVER commit (git-ignored + docker-ignored); prod values live only on the VM. Keys in `.env.example` (`POSTGRES_*, DATABASE_URL, AUTH_SECRET, NEXTAUTH_URL, CADDY_DOMAIN, SEED_ADMIN_*`)
+- `scripts/reset-prod.sh` — guarded one-time v2 baseline reset (see below)
+- Prisma pinned to **v6** (`prisma@6` + `@prisma/client@6`). Do NOT `npm install prisma@latest` (v8 RC breaks the `validate`/`migrate dev` workflow).
+
+## One-time v2 baseline reset (existing pilot DB)
+
+The v1 schema (pre-assignment roles, no `acronym`/`round`, different columns and
+enums) is incompatible with the v2 baseline migration `20261016072820_init_v2`.
+If the VM already ran v1, drop and rebuild the schema once. **It snapshots first,
+but back up regardless.**
+
+```bash
+cd /opt/tracker
+CONFIRM=DROP SEED=1 ./scripts/reset-prod.sh
+curl -k https://tracker.internal/api/health   # -> {"ok":true,...}
+```
+
+The script refuses to run without `CONFIRM=DROP`, dumps to `/backups`, stops
+`app`, drops and recreates the `public` schema (which also clears the stale v1
+`_prisma_migrations` ledger), applies the v2 baseline through the `migrate`
+service, and seeds when `SEED=1`. A brand-new VM skips this section — go straight
+to First deploy.
 
 ## First deploy (cold VM)
 ```bash
-git pull  # or copy repo to /opt/tracker
-cp .env.example .env && nano .env   # set POSTGRES_PASSWORD, AUTH_SECRET (openssl rand -base64 32), NEXTAUTH_URL=https://tracker.internal, CADDY_DOMAIN=tracker.internal
-docker compose -f docker/compose.yml up -d --build
-docker exec tracker-app npx prisma migrate deploy
-docker exec tracker-app npm run seed   # dummy 3/28/27/40 pre-pilot only
-curl -k https://tracker.internal/api/health  # -> {"ok":true,...}
+git pull                               # or copy the repo to /opt/tracker
+cp .env.example .env && nano .env      # set POSTGRES_PASSWORD, AUTH_SECRET (openssl rand -base64 32), NEXTAUTH_URL=https://tracker.internal, CADDY_DOMAIN=tracker.internal
+docker compose -f docker/compose.yml up -d --build      # db → migrate → app/caddy
+docker compose -f docker/compose.yml run --rm -e SEED_RESET=1 migrate npm run seed
+curl -k https://tracker.internal/api/health             # -> {"ok":true,...}
 ```
 
 ## Updates
 ```bash
 git pull
-docker compose -f docker/compose.yml up -d --build
-docker exec tracker-app npx prisma migrate deploy
+docker compose -f docker/compose.yml up -d --build      # `migrate` re-applies any pending migrations
 curl -k https://tracker.internal/api/health
 ```
 
 ## Checks
-- `docker ps` — `tracker-db`, `tracker-app`, `tracker-caddy` Up (db healthy)
+- `docker ps` — `tracker-db`, `tracker-app`, `tracker-caddy` Up (db healthy); `tracker-migrate` has exited 0
+- `docker compose -f docker/compose.yml logs migrate` — migration output
 - `docker compose -f docker/compose.yml logs -f app` — auth/seed errors surface here
 - `GET /api/health` — 200, no auth, no DB ping (Caddy/uptime safe)
 
 ## Notes
-- `.env` must NOT be baked into image — confirm `.dockerignore` excludes `.env`/`.env*.local` before VM build.
-- Fonts use `next/font/google` at build time — VM needs internet at `docker build`, or switch to self-hosted fonts.
-- Seed (`npm run seed`) is idempotent via upserts; run only pre-pilot. Never with real data (`SEED_RESET` stays unset in prod).
+- `.env` is excluded by `.dockerignore` and `.gitignore` — secrets are never baked into the image. Verify with `git check-ignore .env`.
+- Migrations and seed run in the `migrate` service (`tools` image), **not** in `app`: the runner is a lean standalone bundle with no Prisma CLI and no `tsx`.
+- Fonts use `next/font/google` at build time — the VM needs internet at `docker build`, or switch to self-hosted fonts.
+- Seed (`npm run seed`) is idempotent via upserts; run only pre-pilot. Never with real data (`SEED_RESET` wipes every table — one-time baseline reset only).
+- **Credentials:** the seed creates ~90 managers on a shared `Tracker@123`. Rotate after distribution:
+  - bulk: `docker compose -f docker/compose.yml run --rm migrate npm run rotate-managers -- '<new-password>'`
+  - single user: Admin → Users → Reset password
+  - admin: `docker compose -f docker/compose.yml run --rm migrate npm run reset-admin -- admin@tracker.local '<new-password>'`

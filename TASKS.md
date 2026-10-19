@@ -11,9 +11,9 @@
 
 ---
 
-## 0. Dummy Data Contract (SUPERSEDED — see prisma/real-data.ts)
-> Real masters now come from project_name_export.xlsx: 28 projects / 41 plazas
-> (offices excluded, one cell = one plaza). Users still dummy (27).
+## 0. Dummy Data Contract (SUPERSEDED — see prisma/nhit-data.ts)
+> Real masters now come from `docs/NHIT Project List.xlsx` (parsed by `scripts/parse-nhit.py`):
+> 28 projects / 46 plazas, with every manager imported as a real login (94 users total).
 > Apply with SEED_RESET=1 + seed (full wipe, pre-pilot only).
 
 ### 0.1 Projects (3)

@@ -222,8 +222,8 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
           <small>{project.plazaCount} plaza sites{roundLabel ? ` · ${roundLabel}` : ""}</small>
         </span>
       </span>
-      <span className="project-progress-cell" role="cell" aria-label={`${done} of ${total} tasks completed`}>
-        <span>{done}/{total}</span>
+      <span className="project-progress-cell" role="cell" aria-label={`${percent}% complete · ${done} of ${total} tasks completed`}>
+        <span><b>{percent}%</b> · {done}/{total}</span>
         <i className="project-progress"><i style={{ width: `${percent}%` }} /></i>
       </span>
       <span className={`project-count ${project.task.overdue ? "risk" : "zero"}`} role="cell">{project.task.overdue}</span>
@@ -240,6 +240,19 @@ function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
     const haystack = `${project.name} ${project.acronym ?? ""}`.toLowerCase();
     return matchesRound && (!query.trim() || haystack.includes(query.trim().toLowerCase()));
   }), [projects, query, round]);
+  const groups = useMemo(() => {
+    const order: RoundKey[] = ["ROUND_1", "ROUND_2", "ROUND_3", "ROUND_4"];
+    const byRound = new Map<RoundKey, ProjectSummary[]>();
+    for (const project of filtered) {
+      const key = (project.round && project.round in ROUND_LABELS ? project.round : "ROUND_1") as RoundKey;
+      const list = byRound.get(key) ?? [];
+      list.push(project);
+      byRound.set(key, list);
+    }
+    return order
+      .filter((key) => byRound.has(key))
+      .map((key) => ({ key, label: ROUND_LABELS[key], projects: byRound.get(key)! }));
+  }, [filtered]);
 
   return (
     <section className="cockpit-panel" aria-labelledby="project-register-title">
@@ -255,15 +268,27 @@ function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
           <input id="project-search" type="search" placeholder="Project name" value={query} onChange={(event) => setQuery(event.target.value)} />
         </div>
       </div>
-      <div className="cockpit-project-columns" role="table" aria-label="Projects by completion and risk" aria-rowcount={filtered.length + 1} aria-colcount={4}>
+      <div className="cockpit-project-columns" role="table" aria-label="Projects by completion and risk" aria-rowcount={filtered.length + groups.length + 1} aria-colcount={4}>
         <div className="cockpit-project-head" role="row">
           <span role="columnheader">Project</span>
           <span role="columnheader">Completion</span>
           <span role="columnheader">Overdue</span>
           <span role="columnheader">Blocked</span>
         </div>
-        <div className="cockpit-project-body" role="rowgroup">
-          {filtered.map((project) => <ProjectRow key={project.id} project={project} />)}
+        <div className="cockpit-project-body">
+          {groups.map((group) => (
+            <div className="cockpit-project-group-body" key={group.key}>
+              <div className="cockpit-project-group" role="row">
+                <span role="cell" aria-colspan={4}>
+                  <strong>{group.label}</strong>
+                  <small>{group.projects.length} {group.projects.length === 1 ? "project" : "projects"}</small>
+                </span>
+              </div>
+              <div role="rowgroup">
+                {group.projects.map((project) => <ProjectRow key={project.id} project={project} />)}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
       {filtered.length === 0 ? <p className="cockpit-empty">No projects match the selected filters.</p> : null}
@@ -550,6 +575,14 @@ function ManagerWorkbench() {
 
       {loading ? <div className="cockpit-loading" aria-label="Loading assigned work" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
         <>
+          <section className="cockpit-metrics manager-metrics" aria-label="Assigned work summary">
+            <Metric label="Projects" value={snapshot.projectCount} note="In your scope" />
+            <Metric label="Plaza sites" value={plazas.length} note="Assigned to you" />
+            <Metric label="Open tasks" value={snapshot.kpis.open} note="Across your sites" />
+            <Metric label="Overdue" value={snapshot.kpis.overdue} note="Needs an update" tone="risk" />
+            <Metric label="Blocked" value={snapshot.kpis.blocked} note="Needs unblock" tone="blocked" />
+          </section>
+
           <section className="cockpit-manager-grid">
             <section className="cockpit-panel" aria-labelledby="work-queue-title">
               <div className="cockpit-panel-head manager-panel-head">
@@ -603,13 +636,6 @@ function ManagerWorkbench() {
             </aside>
           </section>
 
-          <section className="cockpit-metrics manager-metrics" aria-label="Assigned work summary">
-            <Metric label="Projects" value={snapshot.projectCount} note="In your scope" />
-            <Metric label="Plaza sites" value={plazas.length} note="Assigned to you" />
-            <Metric label="Open tasks" value={snapshot.kpis.open} note="Across your sites" />
-            <Metric label="Overdue" value={snapshot.kpis.overdue} note="Needs an update" tone="risk" />
-            <Metric label="Blocked" value={snapshot.kpis.blocked} note="Needs unblock" tone="blocked" />
-          </section>
           <p className="cockpit-footnote">Showing your assigned scope. Open a task to update its status, owner, or history.</p>
         </>
       ) : null}

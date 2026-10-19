@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "reset-admin": "tsx scripts/reset-admin.ts",
+    "rotate-managers": "tsx scripts/rotate-manager-passwords.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "prisma": {

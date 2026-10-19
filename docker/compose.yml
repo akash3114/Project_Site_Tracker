@@ -15,6 +15,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot: applies Prisma migrations, then exits. Re-runs on every `up`.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: tools
+    container_name: tracker-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tracker}:${POSTGRES_PASSWORD:-tracker}@db:5432/${POSTGRES_DB:-tracker}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-change-me}
+    command: npx prisma migrate deploy
+
   app:
     build:
       context: ..
@@ -24,13 +40,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tracker}:${POSTGRES_PASSWORD:-tracker}@db:5432/${POSTGRES_DB:-tracker}?schema=public
       AUTH_SECRET: ${AUTH_SECRET:-change-me}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
     ports:
       - "3000:3000"
-    command: sh -c "npx prisma migrate deploy && node server.js"
 
   caddy:
     image: caddy:2-alpine
