@@ -241,11 +241,27 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
+  gap: 22px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--c-rule);
+}
+.cockpit-title-copy {
+  position: relative;
+  min-width: 0;
+  padding-left: 14px;
+}
+.cockpit-title-copy::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 3px;
+  background: var(--c-forest);
 }
 .cockpit-overline {
-  margin: 0 0 2px;
+  margin: 0 0 3px;
   color: var(--c-muted);
   font-size: 10px;
   font-weight: 750;
@@ -262,9 +278,10 @@
   line-height: 1.18;
 }
 .cockpit-subtitle {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   color: var(--c-muted);
-  font-size: 12px;
+  font-size: 12.5px;
+  max-width: 62ch;
 }
 .cockpit-title-actions {
   display: flex;

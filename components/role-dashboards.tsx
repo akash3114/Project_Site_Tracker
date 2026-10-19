@@ -63,6 +63,20 @@ const ROUND_LABELS: Record<RoundKey, string> = {
   ROUND_3: "Round 3",
   ROUND_4: "Round 4",
 };
+const ROUND_NUM: Record<RoundKey, string> = {
+  ROUND_1: "1",
+  ROUND_2: "2",
+  ROUND_3: "3",
+  ROUND_4: "4",
+};
+
+/** Round scope for the header, e.g. "Rounds 1–4", derived from the loaded snapshot. */
+function roundScopeLabel(rounds?: Snapshot["rounds"]): string {
+  const active = (rounds ?? []).filter((entry) => entry.projectCount > 0);
+  if (active.length === 0) return "All rounds";
+  if (active.length === 1) return `Round ${ROUND_NUM[active[0].round]}`;
+  return `Rounds ${ROUND_NUM[active[0].round]}–${ROUND_NUM[active[active.length - 1].round]}`;
+}
 
 async function apiJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
@@ -466,10 +480,10 @@ function ManagementDashboard() {
   return (
     <PageFrame>
       <div className="cockpit-title-row">
-        <div>
-          <p className="cockpit-overline">Portfolio control · Rounds 1–4</p>
-          <h1>Portfolio at a glance</h1>
-          <p className="cockpit-subtitle">Delivery status across every project and plaza site.</p>
+        <div className="cockpit-title-copy">
+          <p className="cockpit-overline">All projects · {roundScopeLabel(snapshot?.rounds)}</p>
+          <h1>Delivery overview</h1>
+          <p className="cockpit-subtitle">Live status across every project and plaza, with exceptions surfaced first.</p>
         </div>
         <div className="cockpit-title-actions">
           <span className="cockpit-live"><i aria-hidden="true" />Live data{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</span>
@@ -565,10 +579,10 @@ function ManagerWorkbench() {
   return (
     <PageFrame>
       <div className="cockpit-title-row">
-        <div>
-          <p className="cockpit-overline">Assigned work · Project and plaza operations</p>
+        <div className="cockpit-title-copy">
+          <p className="cockpit-overline">Assigned scope · Projects and plazas</p>
           <h1>Your workbench</h1>
-          <p className="cockpit-subtitle">Tasks and site health across your assigned projects and plazas.</p>
+          <p className="cockpit-subtitle">Tasks and site health across everything assigned to you.</p>
         </div>
         {!loading && !error ? <TaskCreateAction plazas={plazas} tasks={tasks} onCreated={() => void load()} /> : null}
       </div>
