@@ -11,6 +11,7 @@ const safeSelect = {
   id: true,
   name: true,
   email: true,
+  phone: true,
   role: true,
   active: true,
   createdAt: true,
@@ -19,7 +20,7 @@ const safeSelect = {
 
 /**
  * PATCH /api/users/:id → ADMIN only.
- * Supports { name?, role?, active?, password? }.
+ * Supports { name?, phone?, role?, active?, password? }.
  * Deactivation via { active: false } — users are NEVER deleted
  * (no DELETE export exists on this route).
  */
@@ -42,11 +43,13 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
   const data: {
     name?: string;
+    phone?: string | null;
     role?: typeof target.role;
     active?: boolean;
     passwordHash?: string;
   } = {};
   if (parsed.data.name !== undefined) data.name = parsed.data.name;
+  if (parsed.data.phone !== undefined) data.phone = parsed.data.phone;
   if (parsed.data.role !== undefined) data.role = parsed.data.role;
   if (parsed.data.active !== undefined) data.active = parsed.data.active;
   if (parsed.data.password !== undefined)

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { accessiblePlazaIds, getSessionUser } from "@/lib/access";
+import { accessiblePlazaIds, canManage, getSessionUser } from "@/lib/access";
 import { db } from "@/lib/db";
 import { projectStats } from "@/lib/stats";
 import { projectSchema } from "@/lib/validations";
@@ -14,10 +14,10 @@ export async function GET() {
   const visible = await accessiblePlazaIds(user.id, user.role);
   const projects = await db.project.findMany({
     where:
-      user.role === "ADMIN"
-        ? undefined
-        : { plazas: { some: { id: { in: visible } } } },
-    orderBy: { name: "asc" },
+      user.role === "MANAGER"
+        ? { plazas: { some: { id: { in: visible } } } }
+        : undefined,
+    orderBy: [{ round: "asc" }, { name: "asc" }],
   });
 
   const items = await Promise.all(
@@ -26,9 +26,7 @@ export async function GET() {
       return {
         id: p.id,
         name: p.name,
-        description: p.description,
         acronym: p.acronym,
-        state: p.state,
         round: p.round,
         status: p.status,
         plazaCount: s.plazaCount,
@@ -47,11 +45,11 @@ export async function GET() {
   return NextResponse.json(items);
 }
 
-/** POST /api/projects → ADMIN only. 409 on duplicate name. */
+/** POST /api/projects → ADMIN + MANAGEMENT. 409 on duplicate (name, round). */
 export async function POST(req: Request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ADMIN")
+  if (!canManage(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body: unknown = await req.json().catch(() => null);
@@ -62,12 +60,12 @@ export async function POST(req: Request) {
       { status: 400 },
     );
 
-  const existing = await db.project.findUnique({
-    where: { name: parsed.data.name },
+  const existing = await db.project.findFirst({
+    where: { name: parsed.data.name, round: parsed.data.round },
   });
   if (existing)
     return NextResponse.json(
-      { error: "Project name already exists" },
+      { error: "Project already exists in this round" },
       { status: 409 },
     );
 
@@ -75,19 +73,16 @@ export async function POST(req: Request) {
     const created = await db.project.create({
       data: {
         name: parsed.data.name,
-        description: parsed.data.description,
         acronym: parsed.data.acronym,
-        state: parsed.data.state,
         round: parsed.data.round,
         status: parsed.data.status ?? "ACTIVE",
-        createdById: user.id,
       },
     });
     return NextResponse.json(created, { status: 201 });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
       return NextResponse.json(
-        { error: "Project name already exists" },
+        { error: "Project already exists in this round" },
         { status: 409 },
       );
     throw e;

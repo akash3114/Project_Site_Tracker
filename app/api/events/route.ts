@@ -2,12 +2,12 @@ import { auth } from "@/lib/auth";
 import { accessiblePlazaIds } from "@/lib/access";
 import { db } from "@/lib/db";
 
-/** GET /api/events?take=100 — read-only audit feed (T-040). Admin: all; Lead: accessible plazas. */
+/** GET /api/events?take=100 — read-only audit feed. Admin: all; Management: accessible plazas. */
 export async function GET(req: Request): Promise<Response> {
   const session = await auth();
   if (!session?.user) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const role = (session.user as { role?: string }).role;
-  if (role !== "ADMIN" && role !== "PROJECT_LEAD") {
+  if (role !== "ADMIN" && role !== "MANAGEMENT") {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   const url = new URL(req.url);
@@ -18,7 +18,7 @@ export async function GET(req: Request): Promise<Response> {
     role === "ADMIN"
       ? {}
       : {
-          task: { plazaId: { in: await accessiblePlazaIds(userId, role as "PROJECT_LEAD") } },
+          task: { plazaId: { in: await accessiblePlazaIds(userId, role as "MANAGEMENT") } },
         };
 
   const events = await db.taskEvent.findMany({

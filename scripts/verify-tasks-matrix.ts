@@ -72,7 +72,7 @@ function check(
 
 async function main() {
   const admin = await login("admin@tracker.local", "Admin@123");
-  const lead = await login("m.ravindran@tracker.local", "Tracker@123");
+  const mgmt = await login("management@tracker.local", "Manage@123");
   const site = await login("sunil.shukla@tracker.local", "Tracker@123");
   console.log("logins ok");
 
@@ -161,22 +161,22 @@ async function main() {
     403,
   );
 
-  // 7. lead reopen -> 200 (lead.p1 needs access to ownPlaza; if not, complete+reopen in P1 plaza instead)
-  const leadList = (await req(lead, "GET", "/api/tasks?pageSize=100")).json as {
+  // 7. management reopen -> 200 (management sees all plazas)
+  const mgmtList = (await req(mgmt, "GET", "/api/tasks?pageSize=100")).json as {
     items: { id: string; plazaId: string; status: string }[];
   };
-  let target = leadList.items.find((t) => t.status === "COMPLETED");
+  let target = mgmtList.items.find((t) => t.status === "COMPLETED");
   if (!target) {
-    const leadPlaza = leadList.items[0]?.plazaId;
-    if (!leadPlaza) throw new Error("lead sees no tasks");
-    const c = (await req(lead, "POST", "/api/tasks", { plazaId: leadPlaza, title: "Lead reopen probe" }))
+    const mgmtPlaza = mgmtList.items[0]?.plazaId;
+    if (!mgmtPlaza) throw new Error("management sees no tasks");
+    const c = (await req(mgmt, "POST", "/api/tasks", { plazaId: mgmtPlaza, title: "Management reopen probe" }))
       .json as unknown as { id: string };
     const lid = (c as { id: string }).id;
-    await req(lead, "POST", `/api/tasks/${lid}/status`, { to: "COMPLETED" });
-    target = { id: lid, plazaId: leadPlaza, status: "COMPLETED" };
+    await req(mgmt, "POST", `/api/tasks/${lid}/status`, { to: "COMPLETED" });
+    target = { id: lid, plazaId: mgmtPlaza, status: "COMPLETED" };
   }
-  const reopen = await req(lead, "POST", `/api/tasks/${target.id}/reopen`, { text: "reopening for pilot" });
-  check("lead POST reopen", reopen.status, 200);
+  const reopen = await req(mgmt, "POST", `/api/tasks/${target.id}/reopen`, { text: "reopening for pilot" });
+  check("management POST reopen", reopen.status, 200);
   console.log(`  reopened status=${(reopen.json as { status: string }).status}`);
 
   // 8. comment -> 201 + feed grows

@@ -32,6 +32,7 @@ export function NewTaskDialog({
   onError: (msg: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -46,6 +47,7 @@ export function NewTaskDialog({
 
   async function submit(values: NewTaskValues) {
     setSaving(true);
+    setApiError(null);
     try {
       // Strip empties: server coerces ""→undefined too, but never send junk.
       const body: Record<string, unknown> = { plazaId: values.plazaId, title: values.title };
@@ -61,16 +63,18 @@ export function NewTaskDialog({
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        onError(
-          (data as { error?: string } | null)?.error ??
-            `Create failed (${res.status})`,
-        );
+        const message =
+          (data as { error?: string } | null)?.error ?? `Create failed (${res.status})`;
+        setApiError(message);
+        onError(message);
         return;
       }
       reset({ plazaId, priority: "MEDIUM" });
+      setApiError(null);
       onCreated();
       onClose();
     } catch {
+      setApiError("Network error creating task");
       onError("Network error creating task");
     } finally {
       setSaving(false);
@@ -78,8 +82,8 @@ export function NewTaskDialog({
   }
 
   const input =
-    "min-h-[44px] w-full rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white px-3 font-body text-sm text-[#17222C] placeholder:text-[#8A97A3]";
-  const err = "font-mono text-xs text-[#DC2626]";
+    "min-h-[44px] w-full rounded-[6px] border border-[#CDD6CE] bg-white px-3 font-body text-sm text-[#1C2824] placeholder:text-[#66756D]";
+  const err = "font-mono text-xs text-[#8F2824]";
 
   return (
     <div
@@ -94,12 +98,14 @@ export function NewTaskDialog({
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-t-[12px] bg-white p-6 sm:rounded-[12px]"
       >
-        <h2 className="font-display text-lg font-semibold tracking-[-0.02em] text-[#17222C]">
+        <h2 className="font-display text-lg font-semibold tracking-[-0.02em] text-[#102D27]">
           New task
         </h2>
+        <p className="font-body text-xs text-[#586760]">The task will be recorded under the selected plaza.</p>
+        {apiError ? <p role="alert" className="border border-[#8F2824]/30 bg-[#FBE8E4] px-3 py-2 font-body text-sm text-[#8F2824]">{apiError}</p> : null}
         <input type="hidden" {...register("plazaId")} value={plazaId} />
         <div className="flex flex-col gap-1">
-          <label htmlFor="nt-title" className="font-body text-sm text-[#5C6F7E]">
+          <label htmlFor="nt-title" className="font-body text-sm text-[#586760]">
             Title
           </label>
           <input
@@ -115,7 +121,7 @@ export function NewTaskDialog({
         <div className="flex flex-col gap-1">
           <label
             htmlFor="nt-desc"
-            className="font-body text-sm text-[#5C6F7E]"
+            className="font-body text-sm text-[#586760]"
           >
             Description (optional)
           </label>
@@ -133,7 +139,7 @@ export function NewTaskDialog({
           <div className="flex flex-col gap-1">
             <label
               htmlFor="nt-priority"
-              className="font-body text-sm text-[#5C6F7E]"
+              className="font-body text-sm text-[#586760]"
             >
               Priority
             </label>
@@ -148,7 +154,7 @@ export function NewTaskDialog({
           <div className="flex flex-col gap-1">
             <label
               htmlFor="nt-due"
-              className="font-body text-sm text-[#5C6F7E]"
+              className="font-body text-sm text-[#586760]"
             >
               Due date (optional)
             </label>
@@ -168,7 +174,7 @@ export function NewTaskDialog({
         <div className="flex flex-col gap-1">
           <label
             htmlFor="nt-assignee"
-            className="font-body text-sm text-[#5C6F7E]"
+            className="font-body text-sm text-[#586760]"
           >
             Assignee (optional, plaza members)
           </label>
@@ -194,14 +200,14 @@ export function NewTaskDialog({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[44px] flex-1 rounded-[6px] border border-[rgba(23,34,44,0.08)] px-4 font-body text-sm text-[#5C6F7E] pst-transition hover:text-[#17222C]"
+            className="min-h-[44px] flex-1 rounded-[6px] border border-[#CDD6CE] px-4 font-body text-sm text-[#586760] pst-transition hover:text-[#1C2824]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="min-h-[44px] flex-1 rounded-[6px] bg-[#5E6AD2] px-4 font-body text-sm font-semibold text-white pst-transition hover:brightness-110 disabled:opacity-60"
+            className="min-h-[44px] flex-1 rounded-[6px] bg-[#173B33] px-4 font-body text-sm font-semibold text-white pst-transition hover:brightness-110 disabled:opacity-60"
           >
             {saving ? "Creating…" : "Create task"}
           </button>

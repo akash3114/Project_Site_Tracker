@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { getSessionUser, requirePlazaAccess } from "@/lib/access";
+import { canManage, getSessionUser, requirePlazaAccess } from "@/lib/access";
 import { db } from "@/lib/db";
 import { plazaProgress } from "@/lib/progress";
-import { plazaSchema } from "@/lib/validations";
+import { updatePlazaSchema } from "@/lib/validations";
 
 type Ctx = { params: { id: string } };
 
@@ -46,9 +46,6 @@ export async function GET(_req: Request, { params }: Ctx) {
     projectId: plaza.projectId,
     project: plaza.project,
     name: plaza.name,
-    chainage: plaza.chainage,
-    highway: plaza.highway,
-    location: plaza.location,
     lengthKm: plaza.lengthKm,
     state: plaza.state,
     piu: plaza.piu,
@@ -61,18 +58,18 @@ export async function GET(_req: Request, { params }: Ctx) {
   });
 }
 
-/** PATCH /api/plazas/:id → ADMIN only. 409 on (projectId, name) duplicate. */
+/** PATCH /api/plazas/:id → ADMIN + MANAGEMENT. 409 on (projectId, name) duplicate. */
 export async function PATCH(req: Request, { params }: Ctx) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ADMIN")
+  if (!canManage(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const plaza = await db.plaza.findUnique({ where: { id: params.id } });
   if (!plaza) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body: unknown = await req.json().catch(() => null);
-  const parsed = plazaSchema.omit({ projectId: true }).partial().safeParse(body);
+  const parsed = updatePlazaSchema.safeParse(body);
   if (!parsed.success)
     return NextResponse.json(
       { error: "Invalid input", issues: parsed.error.issues },

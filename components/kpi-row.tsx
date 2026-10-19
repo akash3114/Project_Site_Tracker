@@ -6,10 +6,10 @@ export type KpiItem = {
 };
 
 const TONE_STYLES: Record<NonNullable<KpiItem["tone"]>, string> = {
-  default: "text-[#17222C]",
-  overdue: "text-[#DC2626]",
-  blocked: "text-[#92400E]",
-  completed: "text-[#166534]",
+  default: "text-[#1C2824]",
+  overdue: "text-[#8F2824]",
+  blocked: "text-[#704900]",
+  completed: "text-[#385A2B]",
 };
 
 export function KpiRow({ items }: { items: KpiItem[] }) {
@@ -19,16 +19,16 @@ export function KpiRow({ items }: { items: KpiItem[] }) {
         {items.map((kpi) => (
           <div
             key={kpi.label}
-            className="min-h-[44px] rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4 shadow-[0_1px_2px_rgba(23,34,44,0.04)]"
+            className="min-h-[44px] rounded-[12px] border border-[#CDD6CE] bg-white p-4 shadow-[0_1px_2px_rgba(23,34,44,0.04)]"
           >
-            <p className="font-body text-sm text-[#5C6F7E]">{kpi.label}</p>
+            <p className="font-body text-sm text-[#586760]">{kpi.label}</p>
             <p
               className={`font-display text-2xl font-semibold tracking-[-0.02em] ${TONE_STYLES[kpi.tone ?? "default"]}`}
             >
               {kpi.value}
             </p>
             {kpi.hint ? (
-              <p className="font-mono text-xs text-[#8A97A3]">{kpi.hint}</p>
+              <p className="font-mono text-xs text-[#66756D]">{kpi.hint}</p>
             ) : null}
           </div>
         ))}

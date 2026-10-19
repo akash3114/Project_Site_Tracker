@@ -1,5 +1,9 @@
 # Project Site Tracker — TASKS.md (Pilot Build, Option A)
 
+> SUPERSEDED by the v2 design in `docs/DATABASE.md` (roles ADMIN | MANAGEMENT | MANAGER,
+> `project_assignments` / `plaza_assignments`, free-text state/piu/ro, round-required projects).
+> Kept for build-phase history only — do not implement new work from this file.
+
 > Stack: Next.js 14+ App Router + TS + Tailwind + shadcn/ui + Prisma + Postgres 16 + Auth.js v5 Credentials.
 > Hierarchy: `Project -> Plaza -> Task -> TaskEvent(feed) + single assignee`. Progress derived from status.
 > Dummy data: Section 0. No Excel — use dummy masters below for all seeding/dev.

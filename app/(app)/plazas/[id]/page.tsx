@@ -4,7 +4,6 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { fmtDate, isOverdue } from "@/lib/format";
-import { AppSidebar } from "@/components/app-sidebar";
 import { ProgressBar } from "@/components/progress-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { TaskTable, type PlazaTaskItem } from "@/components/task-table";
@@ -230,22 +229,8 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
   const denied = plazaState === "denied";
 
   return (
-    <div className="flex min-h-screen bg-[#F4F5F7] font-body text-[#17222C]">
-      <AppSidebar active="Projects" />
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex min-h-[64px] items-center gap-3 border-b border-[rgba(23,34,44,0.08)] bg-white px-4">
-          <p className="font-display text-base font-semibold tracking-[-0.02em] md:hidden">
-            Site Tracker
-          </p>
-          <div className="ml-auto flex items-center gap-3">
-            <span className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-[#0E121B] font-display text-sm font-semibold text-white">
-              OP
-            </span>
-          </div>
-        </header>
-
-        <div className="sticky top-[64px] z-10 border-b border-[rgba(23,34,44,0.08)] bg-[#F4F5F7]/95 px-4 py-2 backdrop-blur md:px-6">
+    <>
+      <div className="cockpit-plaza-filter sticky z-10 border-b border-[#CDD6CE] bg-[#F5F5EF]/95 px-4 py-2 backdrop-blur md:px-6">
           <div className="mx-auto w-full max-w-6xl">
             <TaskFiltersBar
               filters={filters}
@@ -253,21 +238,21 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               assignees={assignees}
             />
           </div>
-        </div>
+      </div>
 
-        <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
-          <nav aria-label="Breadcrumb" className="font-mono text-xs text-[#8A97A3]">
-            <a href="/" className="hover:text-[#17222C]">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
+          <nav aria-label="Breadcrumb" className="font-mono text-xs text-[#66756D]">
+            <a href="/" className="hover:text-[#1C2824]">
               Dashboard
             </a>
             {" / "}
-            <a href="/projects" className="hover:text-[#17222C]">
+            <a href="/projects" className="hover:text-[#1C2824]">
               Projects
             </a>
             {" / "}
             <span>{plaza?.project?.name ?? "…"}</span>
             {" / "}
-            <span aria-current="page" className="text-[#17222C]">
+            <span aria-current="page" className="text-[#1C2824]">
               {plaza?.name ?? "Plaza"}
             </span>
           </nav>
@@ -277,8 +262,8 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               role={notice.tone === "err" ? "alert" : "status"}
               className={`rounded-[6px] border px-3 py-2 font-body text-sm ${
                 notice.tone === "ok"
-                  ? "border-green-500/40 bg-[#DCFCE7] text-[#166534]"
-                  : "border-red-500/40 bg-[#FEE2E2] text-[#991B1B]"
+                  ? "border-green-500/40 bg-[#E8F0DD] text-[#385A2B]"
+                  : "border-red-500/40 bg-[#FBE8E4] text-[#991B1B]"
               }`}
             >
               {notice.msg}
@@ -288,12 +273,12 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
           {denied ? (
             <section
               role="alert"
-              className="rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-8 text-center"
+              className="rounded-[12px] border border-[#CDD6CE] bg-white p-8 text-center"
             >
               <h1 className="font-display text-xl font-semibold tracking-[-0.02em]">
                 Access denied
               </h1>
-              <p className="mt-2 font-body text-sm text-[#5C6F7E]">
+              <p className="mt-2 font-body text-sm text-[#586760]">
                 You are not mapped to this plaza. Ask your project lead for
                 access.
               </p>
@@ -301,7 +286,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
           ) : plazaState === "missing" ? (
             <section
               role="alert"
-              className="rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-8 text-center"
+              className="rounded-[12px] border border-[#CDD6CE] bg-white p-8 text-center"
             >
               <h1 className="font-display text-xl font-semibold tracking-[-0.02em]">
                 Plaza not found
@@ -311,10 +296,10 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
             <>
               <div className="flex flex-wrap items-center gap-3">
                 <div>
-                  <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#17222C]">
+                  <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#1C2824]">
                     {plaza?.name ?? "Loading…"}
                   </h1>
-                  <p className="font-body text-sm text-[#5C6F7E]">
+                  <p className="font-body text-sm text-[#586760]">
                     {plaza ? plazaMeta(plaza) || "Loading plaza…" : "Loading plaza…"}
                   </p>
                 </div>
@@ -322,7 +307,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                   <div
                     role="group"
                     aria-label="View toggle"
-                    className="flex rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white p-1"
+                    className="flex rounded-[6px] border border-[#CDD6CE] bg-white p-1"
                   >
                     {(["table", "board"] as const).map((v) => (
                       <button
@@ -332,8 +317,8 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                         onClick={() => setView(v)}
                         className={`min-h-[44px] rounded-[6px] px-4 font-body text-sm capitalize pst-transition ${
                           view === v
-                            ? "bg-[#0E121B] font-semibold text-white"
-                            : "text-[#5C6F7E] hover:text-[#17222C]"
+                            ? "bg-[#102D27] font-semibold text-white"
+                            : "text-[#586760] hover:text-[#1C2824]"
                         }`}
                       >
                         {v}
@@ -343,7 +328,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                   <button
                     type="button"
                     onClick={() => setDialogOpen(true)}
-                    className="min-h-[44px] rounded-[6px] bg-[#5E6AD2] px-5 font-body text-sm font-semibold text-white pst-transition hover:brightness-110"
+                    className="min-h-[44px] rounded-[6px] bg-[#173B33] px-5 font-body text-sm font-semibold text-white pst-transition hover:brightness-110"
                   >
                     + New Task
                   </button>
@@ -351,9 +336,9 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               </div>
 
               {plaza?.task ? (
-                <div className="flex flex-col gap-2 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4 shadow-[0_1px_2px_rgba(23,34,44,0.04)]">
+                <div className="flex flex-col gap-2 rounded-[12px] border border-[#CDD6CE] bg-white p-4 shadow-[0_1px_2px_rgba(23,34,44,0.04)]">
                   <ProgressBar value={plaza.progressPct ?? 0} />
-                  <p className="font-mono text-xs text-[#5C6F7E]">
+                  <p className="font-mono text-xs text-[#586760]">
                     {plaza.task.completed}/{plaza.task.total} complete ·{" "}
                     {plaza.task.blocked} blocked · {plaza.task.overdue} overdue
                   </p>
@@ -361,12 +346,12 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               ) : null}
 
               {loadingTasks ? (
-                <p className="font-body text-sm text-[#5C6F7E]">
+                <p className="font-body text-sm text-[#586760]">
                   Loading tasks…
                 </p>
               ) : view === "table" ? (
                 <section aria-label={`Tasks (${total})`}>
-                  <p className="mb-2 font-mono text-xs text-[#8A97A3]">
+                  <p className="mb-2 font-mono text-xs text-[#66756D]">
                     {total} task{total === 1 ? "" : "s"}
                   </p>
                   <TaskTable tasks={tasks} onSelect={openTask} />
@@ -379,33 +364,33 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                   {BOARD_COLUMNS.map((col) => (
                     <div
                       key={col}
-                      className="flex flex-col gap-2 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-3"
+                      className="flex flex-col gap-2 rounded-[12px] border border-[#CDD6CE] bg-white p-3"
                     >
-                      <h2 className="flex items-center justify-between font-display text-sm font-semibold text-[#17222C]">
+                      <h2 className="flex items-center justify-between font-display text-sm font-semibold text-[#1C2824]">
                         <StatusBadge status={col} />
-                        <span className="font-mono text-xs text-[#8A97A3]">
+                        <span className="font-mono text-xs text-[#66756D]">
                           {(board.get(col) ?? []).length}
                         </span>
                       </h2>
                       {(board.get(col) ?? []).map((task) => (
                         <article
                           key={task.id}
-                          className="flex flex-col gap-2 rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-[#FAFBFC] p-3"
+                          className="flex flex-col gap-2 rounded-[6px] border border-[#CDD6CE] bg-[#FAFBFC] p-3"
                         >
                           <button
                             type="button"
                             onClick={() => openTask(task.id)}
-                            className="text-left font-body text-sm font-medium text-[#17222C]"
+                            className="text-left font-body text-sm font-medium text-[#1C2824]"
                           >
                             {task.title}
                           </button>
                           <span
-                            className={`font-mono text-xs ${isOverdue(task.dueDate, task.status) ? "font-medium text-[#DC2626]" : "text-[#5C6F7E]"}`}
+                            className={`font-mono text-xs ${isOverdue(task.dueDate, task.status) ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}
                           >
                             {task.assignee?.name ?? "Unassigned"} · Due{" "}
                             {fmtDate(task.dueDate)}
                           </span>
-                          <label className="flex items-center gap-2 font-mono text-xs text-[#5C6F7E]">
+                          <label className="flex items-center gap-2 font-mono text-xs text-[#586760]">
                             Move
                             <select
                               aria-label={`Move ${task.title} to status`}
@@ -414,7 +399,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                               }
                               value={task.status}
                               onChange={(e) => void changeStatus(task, e.target.value)}
-                              className="min-h-[44px] flex-1 rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white px-2 font-body text-sm text-[#17222C] disabled:opacity-60"
+                              className="min-h-[44px] flex-1 rounded-[6px] border border-[#CDD6CE] bg-white px-2 font-body text-sm text-[#1C2824] disabled:opacity-60"
                             >
                               {BOARD_COLUMNS.map((s) => (
                                 <option key={s} value={s}>
@@ -426,7 +411,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                         </article>
                       ))}
                       {(board.get(col) ?? []).length === 0 ? (
-                        <p className="p-2 font-body text-sm text-[#8A97A3]">
+                        <p className="p-2 font-body text-sm text-[#66756D]">
                           No tasks.
                         </p>
                       ) : null}
@@ -436,8 +421,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               )}
             </>
           )}
-        </main>
-      </div>
+      </main>
 
       <NewTaskDialog
         plazaId={plazaId}
@@ -457,7 +441,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
         onClose={closeTask}
         onChanged={loadTasks}
       />
-    </div>
+    </>
   );
 }
 

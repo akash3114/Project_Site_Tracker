@@ -44,7 +44,7 @@ export function CommentComposer({
   }
 
   return (
-    <div className="sticky bottom-0 border-t border-[rgba(23,34,44,0.08)] bg-white pt-3">
+    <div className="sticky bottom-0 border-t border-[#CDD6CE] bg-white pt-3">
       <label htmlFor="task-comment" className="sr-only">
         Add a comment
       </label>
@@ -54,13 +54,13 @@ export function CommentComposer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Add a comment…"
-        className="min-h-[44px] w-full rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-[#FAFBFC] px-3 py-2 font-body text-sm text-[#17222C] placeholder:text-[#8A97A3]"
+        className="min-h-[44px] w-full rounded-[6px] border border-[#CDD6CE] bg-[#FAFBFC] px-3 py-2 font-body text-sm text-[#1C2824] placeholder:text-[#66756D]"
       />
       <button
         type="button"
         onClick={post}
         disabled={saving || text.trim().length === 0}
-        className="mt-2 min-h-[44px] w-full rounded-[6px] bg-[#5E6AD2] px-4 font-body text-sm font-semibold text-white pst-transition hover:brightness-110 disabled:opacity-60"
+        className="mt-2 min-h-[44px] w-full rounded-[6px] bg-[#173B33] px-4 font-body text-sm font-semibold text-white pst-transition hover:brightness-110 disabled:opacity-60"
       >
         {saving ? "Posting…" : "Post comment"}
       </button>

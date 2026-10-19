@@ -1,5 +1,9 @@
 # Project Site Tracker — Detailed Build Plan (Pilot)
 
+> SUPERSEDED by the v2 design in `docs/DATABASE.md` (roles ADMIN | MANAGEMENT | MANAGER,
+> `project_assignments` / `plaza_assignments`, free-text state/piu/ro, round-required projects).
+> Kept for build-phase history only — do not implement new work from this file.
+
 ## 1. Overview
 
 **Purpose:** Single web app to track toll plaza site work across multiple projects in one glance.

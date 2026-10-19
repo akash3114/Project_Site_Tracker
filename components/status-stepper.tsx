@@ -50,10 +50,10 @@ export function StatusStepper({
             onClick={() => onChange(step)}
             className={`min-h-[44px] rounded-[6px] border px-2 font-body text-sm pst-transition ${
               isCurrent
-                ? "border-[#5E6AD2] bg-[#5E6AD2]/10 font-semibold text-[#5E6AD2]"
+                ? "border-[#173B33] bg-[#173B33]/10 font-semibold text-[#173B33]"
                 : off
-                  ? "cursor-not-allowed border-[rgba(23,34,44,0.08)] bg-[#FAFBFC] text-[#8A97A3]"
-                  : "border-[rgba(23,34,44,0.08)] bg-white text-[#17222C] hover:border-[#5E6AD2]"
+                  ? "cursor-not-allowed border-[#CDD6CE] bg-[#FAFBFC] text-[#66756D]"
+                  : "border-[#CDD6CE] bg-white text-[#1C2824] hover:border-[#173B33]"
             }`}
           >
             {LABELS[step]}

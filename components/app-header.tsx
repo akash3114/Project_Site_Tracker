@@ -1,0 +1,67 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
+
+type AppRole = "ADMIN" | "MANAGEMENT" | "MANAGER";
+
+export function AppHeader({ role }: { role: AppRole }) {
+  const pathname = usePathname();
+  const home = role === "MANAGER" ? "/my-work" : "/management";
+  const items = role === "MANAGER"
+    ? [
+        { label: "My work", href: "/my-work" },
+        { label: "Projects", href: "/projects" },
+        { label: "My tasks", href: "/my-tasks" },
+      ]
+    : [
+        { label: "Portfolio", href: "/management" },
+        { label: "Projects", href: "/projects" },
+        { label: "My tasks", href: "/my-tasks" },
+        { label: "Administration", href: "/admin" },
+      ];
+  const roleLabel = role === "MANAGER"
+    ? "Project / Plaza Manager"
+    : role === "ADMIN"
+      ? "Administrator"
+      : "Management";
+
+  function isActive(href: string) {
+    if (href === home) return pathname === href || pathname === "/";
+    if (href === "/projects") return pathname.startsWith("/projects") || pathname.startsWith("/plazas");
+    return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
+  return (
+    <header className="cockpit-header">
+      <div className="cockpit-header-inner">
+        <Link className="cockpit-brand" href={home}>
+          <span className="cockpit-mark" aria-hidden="true">NH</span>
+          <span>Site Operations</span>
+        </Link>
+        <nav className="cockpit-nav" aria-label="Main navigation">
+          {items.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={active ? "active" : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="cockpit-user-tools">
+          <span className="cockpit-role">{roleLabel}</span>
+          <button type="button" onClick={() => void signOut({ callbackUrl: "/login" })}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}

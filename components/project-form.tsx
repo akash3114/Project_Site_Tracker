@@ -6,10 +6,8 @@ import { projectSchema } from "@/lib/validations";
 
 export type ProjectFormValue = {
   name: string;
-  description?: string;
   acronym?: string;
-  state?: string;
-  round?: string;
+  round: "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4";
   status?: "ACTIVE" | "ON_HOLD" | "COMPLETED";
 };
 
@@ -23,9 +21,9 @@ type Props = {
 };
 
 const inputCls =
-  "min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm text-[#17222C] placeholder:text-[#8A97A3]";
+  "min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm text-[#1C2824] placeholder:text-[#66756D]";
 
-/** Shared create/edit form for projects (T-012). Validated by projectSchema. */
+/** Shared create/edit form for projects. Validated by projectSchema. */
 export function ProjectForm({
   initial,
   submitLabel,
@@ -35,10 +33,10 @@ export function ProjectForm({
   onCancel,
 }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [description, setDescription] = useState(initial?.description ?? "");
   const [acronym, setAcronym] = useState(initial?.acronym ?? "");
-  const [state, setState] = useState(initial?.state ?? "");
-  const [round, setRound] = useState(initial?.round ?? "");
+  const [round, setRound] = useState<ProjectFormValue["round"]>(
+    initial?.round ?? "ROUND_1",
+  );
   const [status, setStatus] = useState<ProjectFormValue["status"]>(
     initial?.status ?? "ACTIVE",
   );
@@ -49,10 +47,8 @@ export function ProjectForm({
     const opt = (v: string) => (v.trim() ? v.trim() : undefined);
     const parsed = projectSchema.safeParse({
       name: name.trim(),
-      description: opt(description),
       acronym: opt(acronym),
-      state: opt(state),
-      round: opt(round),
+      round,
       status,
     });
     if (!parsed.success) {
@@ -62,9 +58,7 @@ export function ProjectForm({
     setFieldError(null);
     await onSubmit({
       name: parsed.data.name,
-      description: parsed.data.description,
       acronym: parsed.data.acronym,
-      state: parsed.data.state,
       round: parsed.data.round,
       status: parsed.data.status,
     });
@@ -73,9 +67,9 @@ export function ProjectForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-3 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4"
+      className="flex flex-col gap-3 rounded-[12px] border border-[#CDD6CE] bg-white p-4"
     >
-      <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+      <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
         Name
         <input
           className={inputCls}
@@ -87,18 +81,8 @@ export function ProjectForm({
           required
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
-        Description
-        <textarea
-          className={`${inputCls} min-h-[88px]`}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Optional description"
-          maxLength={2000}
-        />
-      </label>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+        <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
           Acronym
           <input
             className={inputCls}
@@ -108,48 +92,44 @@ export function ProjectForm({
             maxLength={20}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
-          State
-          <input
-            className={inputCls}
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-            placeholder="Madhya Pradesh"
-            maxLength={100}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+        <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
           Round
-          <input
+          <select
             className={inputCls}
             value={round}
-            onChange={(e) => setRound(e.target.value)}
-            placeholder="Round 3"
-            maxLength={50}
-          />
+            onChange={(e) =>
+              setRound(e.target.value as ProjectFormValue["round"])
+            }
+            required
+          >
+            <option value="ROUND_1">ROUND_1</option>
+            <option value="ROUND_2">ROUND_2</option>
+            <option value="ROUND_3">ROUND_3</option>
+            <option value="ROUND_4">ROUND_4</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
+          Status
+          <select
+            className={inputCls}
+            value={status}
+            onChange={(e) =>
+              setStatus(e.target.value as ProjectFormValue["status"])
+            }
+          >
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="ON_HOLD">ON_HOLD</option>
+            <option value="COMPLETED">COMPLETED</option>
+          </select>
         </label>
       </div>
-      <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
-        Status
-        <select
-          className={inputCls}
-          value={status}
-          onChange={(e) =>
-            setStatus(e.target.value as ProjectFormValue["status"])
-          }
-        >
-          <option value="ACTIVE">ACTIVE</option>
-          <option value="ON_HOLD">ON_HOLD</option>
-          <option value="COMPLETED">COMPLETED</option>
-        </select>
-      </label>
       {fieldError ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {fieldError}
         </p>
       ) : null}
       {serverError ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {serverError}
         </p>
       ) : null}
@@ -157,7 +137,7 @@ export function ProjectForm({
         <button
           type="submit"
           disabled={submitting}
-          className="min-h-[44px] rounded-[8px] bg-[#5E6AD2] px-4 text-sm font-semibold text-white disabled:opacity-50"
+          className="min-h-[44px] rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
         >
           {submitting ? "Saving…" : submitLabel}
         </button>
@@ -165,7 +145,7 @@ export function ProjectForm({
           <button
             type="button"
             onClick={onCancel}
-            className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#5C6F7E]"
+            className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#586760]"
           >
             Cancel
           </button>

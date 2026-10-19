@@ -1,8 +1,14 @@
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('ADMIN', 'PROJECT_LEAD', 'SITE_USER');
+CREATE TYPE "Role" AS ENUM ('ADMIN', 'MANAGEMENT', 'MANAGER');
+
+-- CreateEnum
+CREATE TYPE "Round" AS ENUM ('ROUND_1', 'ROUND_2', 'ROUND_3', 'ROUND_4');
 
 -- CreateEnum
 CREATE TYPE "MasterStatus" AS ENUM ('ACTIVE', 'ON_HOLD', 'COMPLETED');
+
+-- CreateEnum
+CREATE TYPE "PlazaRole" AS ENUM ('TOLL', 'MAINTENANCE', 'CORRIDOR');
 
 -- CreateEnum
 CREATE TYPE "TaskStatus" AS ENUM ('TODO', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED');
@@ -18,8 +24,9 @@ CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
+    "phone" TEXT,
     "passwordHash" TEXT NOT NULL,
-    "role" "Role" NOT NULL DEFAULT 'SITE_USER',
+    "role" "Role" NOT NULL DEFAULT 'MANAGER',
     "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -31,9 +38,9 @@ CREATE TABLE "User" (
 CREATE TABLE "Project" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "description" TEXT,
+    "acronym" TEXT,
+    "round" "Round" NOT NULL,
     "status" "MasterStatus" NOT NULL DEFAULT 'ACTIVE',
-    "createdById" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -45,9 +52,10 @@ CREATE TABLE "Plaza" (
     "id" TEXT NOT NULL,
     "projectId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "chainage" TEXT,
-    "highway" TEXT,
-    "location" TEXT,
+    "state" TEXT,
+    "piu" TEXT,
+    "ro" TEXT,
+    "lengthKm" DOUBLE PRECISION,
     "status" "MasterStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -56,13 +64,26 @@ CREATE TABLE "Plaza" (
 );
 
 -- CreateTable
-CREATE TABLE "UserPlazaAccess" (
+CREATE TABLE "ProjectAssignment" (
+    "projectId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "plazaId" TEXT NOT NULL,
-    "grantedById" TEXT,
-    "grantedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "isPrimary" BOOLEAN NOT NULL DEFAULT false,
+    "assignedById" TEXT,
+    "assignedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "UserPlazaAccess_pkey" PRIMARY KEY ("userId","plazaId")
+    CONSTRAINT "ProjectAssignment_pkey" PRIMARY KEY ("projectId","userId")
+);
+
+-- CreateTable
+CREATE TABLE "PlazaAssignment" (
+    "plazaId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "role" "PlazaRole" NOT NULL,
+    "isPrimary" BOOLEAN NOT NULL DEFAULT false,
+    "assignedById" TEXT,
+    "assignedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PlazaAssignment_pkey" PRIMARY KEY ("plazaId","userId","role")
 );
 
 -- CreateTable
@@ -107,10 +128,16 @@ CREATE INDEX "User_role_idx" ON "User"("role");
 CREATE INDEX "User_active_idx" ON "User"("active");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Project_name_key" ON "Project"("name");
+CREATE INDEX "Project_round_idx" ON "Project"("round");
 
 -- CreateIndex
 CREATE INDEX "Project_status_idx" ON "Project"("status");
+
+-- CreateIndex
+CREATE INDEX "Project_acronym_idx" ON "Project"("acronym");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Project_name_round_key" ON "Project"("name", "round");
 
 -- CreateIndex
 CREATE INDEX "Plaza_projectId_idx" ON "Plaza"("projectId");
@@ -122,10 +149,16 @@ CREATE INDEX "Plaza_status_idx" ON "Plaza"("status");
 CREATE UNIQUE INDEX "Plaza_projectId_name_key" ON "Plaza"("projectId", "name");
 
 -- CreateIndex
-CREATE INDEX "UserPlazaAccess_userId_idx" ON "UserPlazaAccess"("userId");
+CREATE INDEX "ProjectAssignment_projectId_idx" ON "ProjectAssignment"("projectId");
 
 -- CreateIndex
-CREATE INDEX "UserPlazaAccess_plazaId_idx" ON "UserPlazaAccess"("plazaId");
+CREATE INDEX "ProjectAssignment_userId_idx" ON "ProjectAssignment"("userId");
+
+-- CreateIndex
+CREATE INDEX "PlazaAssignment_plazaId_idx" ON "PlazaAssignment"("plazaId");
+
+-- CreateIndex
+CREATE INDEX "PlazaAssignment_userId_idx" ON "PlazaAssignment"("userId");
 
 -- CreateIndex
 CREATE INDEX "Task_plazaId_status_idx" ON "Task"("plazaId", "status");
@@ -152,10 +185,16 @@ CREATE INDEX "TaskEvent_actorId_idx" ON "TaskEvent"("actorId");
 ALTER TABLE "Plaza" ADD CONSTRAINT "Plaza_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "UserPlazaAccess" ADD CONSTRAINT "UserPlazaAccess_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProjectAssignment" ADD CONSTRAINT "ProjectAssignment_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "UserPlazaAccess" ADD CONSTRAINT "UserPlazaAccess_plazaId_fkey" FOREIGN KEY ("plazaId") REFERENCES "Plaza"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProjectAssignment" ADD CONSTRAINT "ProjectAssignment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PlazaAssignment" ADD CONSTRAINT "PlazaAssignment_plazaId_fkey" FOREIGN KEY ("plazaId") REFERENCES "Plaza"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PlazaAssignment" ADD CONSTRAINT "PlazaAssignment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Task" ADD CONSTRAINT "Task_plazaId_fkey" FOREIGN KEY ("plazaId") REFERENCES "Plaza"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

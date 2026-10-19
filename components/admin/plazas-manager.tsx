@@ -8,9 +8,6 @@ type PlazaItem = {
   projectId: string;
   project?: { id: string; name: string };
   name: string;
-  chainage: string | null;
-  highway: string | null;
-  location: string | null;
   lengthKm: number | null;
   state: string | null;
   piu: string | null;
@@ -30,21 +27,18 @@ async function readError(res: Response): Promise<string> {
 }
 
 const inputCls =
-  "min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm text-[#17222C] placeholder:text-[#8A97A3]";
+  "min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm text-[#1C2824] placeholder:text-[#66756D]";
 const thCls =
-  "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#8A97A3]";
-const tdCls = "px-3 py-2 text-sm text-[#17222C]";
+  "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#66756D]";
+const tdCls = "px-3 py-2 text-sm text-[#1C2824]";
 const btnCls =
-  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#17222C]";
+  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#1C2824]";
 const primaryBtnCls =
-  "inline-flex min-h-[44px] items-center rounded-[8px] bg-[#5E6AD2] px-4 text-sm font-semibold text-white disabled:opacity-50";
+  "inline-flex min-h-[44px] items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50";
 
 const emptyForm = {
   projectId: "",
   name: "",
-  chainage: "",
-  highway: "",
-  location: "",
   lengthKm: "",
   state: "",
   piu: "",
@@ -130,9 +124,6 @@ export function PlazasManager() {
           ...(lengthKm !== undefined ? { lengthKm } : null),
           ...clean({
             name: form.name,
-            chainage: form.chainage,
-            highway: form.highway,
-            location: form.location,
             state: form.state,
             piu: form.piu,
             ro: form.ro,
@@ -176,10 +167,10 @@ export function PlazasManager() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#5C6F7E]">
+        <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#586760]">
           Project
           <select
-            className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 text-sm text-[#17222C]"
+            className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 text-sm text-[#1C2824]"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           >
@@ -206,9 +197,9 @@ export function PlazasManager() {
       {showCreate ? (
         <form
           onSubmit={create}
-          className="grid grid-cols-1 gap-3 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4 md:grid-cols-2"
+          className="grid grid-cols-1 gap-3 rounded-[12px] border border-[#CDD6CE] bg-white p-4 md:grid-cols-2"
         >
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Project
             <select
               className={inputCls}
@@ -224,7 +215,7 @@ export function PlazasManager() {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Name
             <input
               className={inputCls}
@@ -234,34 +225,7 @@ export function PlazasManager() {
               required
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
-            Chainage
-            <input
-              className={inputCls}
-              value={form.chainage}
-              onChange={(e) => setForm({ ...form, chainage: e.target.value })}
-              placeholder="KM 123+450"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
-            Highway
-            <input
-              className={inputCls}
-              value={form.highway}
-              onChange={(e) => setForm({ ...form, highway: e.target.value })}
-              placeholder="NH-48"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
-            Location
-            <input
-              className={inputCls}
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="Town, State"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Length (km)
             <input
               className={inputCls}
@@ -271,7 +235,7 @@ export function PlazasManager() {
               inputMode="decimal"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             State
             <input
               className={inputCls}
@@ -280,7 +244,7 @@ export function PlazasManager() {
               placeholder="Madhya Pradesh"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             PIU
             <input
               className={inputCls}
@@ -289,7 +253,7 @@ export function PlazasManager() {
               placeholder="Jabalpur"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             RO
             <input
               className={inputCls}
@@ -298,7 +262,7 @@ export function PlazasManager() {
               placeholder="Bhopal"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Status
             <select
               className={inputCls}
@@ -311,7 +275,7 @@ export function PlazasManager() {
             </select>
           </label>
           {formError ? (
-            <p role="alert" className="text-sm text-[#DC2626] md:col-span-2">
+            <p role="alert" className="text-sm text-[#8F2824] md:col-span-2">
               {formError}
             </p>
           ) : null}
@@ -331,22 +295,22 @@ export function PlazasManager() {
       ) : null}
 
       {formError && !showCreate ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {formError}
         </p>
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-[#5C6F7E]">Loading plazas…</p>
+        <p className="text-sm text-[#586760]">Loading plazas…</p>
       ) : error ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {error}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white">
+        <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
           <table className="w-full min-w-[760px] border-collapse">
             <thead>
-              <tr className="border-b border-[rgba(23,34,44,0.08)] bg-[#FAFBFC]">
+              <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
                 <th className={thCls}>Plaza</th>
                 <th className={thCls}>Project</th>
                 <th className={thCls}>Length</th>

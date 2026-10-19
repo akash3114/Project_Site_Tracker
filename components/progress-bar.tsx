@@ -16,10 +16,10 @@ export function ProgressBar({
       aria-valuemin={0}
       aria-valuemax={100}
       data-testid="progress-bar"
-      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-[rgba(23,34,44,0.08)]", className)}
+      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-[#CDD6CE]", className)}
     >
       <div
-        className="h-full rounded-full bg-[#5E6AD2] pst-layout"
+        className="h-full rounded-full bg-[#173B33] pst-layout"
         style={{ width: `${clamped}%` }}
       />
     </div>

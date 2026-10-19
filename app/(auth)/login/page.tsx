@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signIn } from "next-auth/react";
@@ -47,8 +47,6 @@ export default function LoginPage() {
 
 function LoginCard() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/";
   const [error, setError] = useState<string | null>(null);
 
   const form = useForm<LoginInput>({
@@ -68,7 +66,8 @@ function LoginCard() {
       setError("Invalid credentials. Please check your email and password.");
       return;
     }
-    router.push(callbackUrl);
+    // The home route chooses the correct landing page from the signed-in role.
+    router.push("/");
     router.refresh();
   }
 

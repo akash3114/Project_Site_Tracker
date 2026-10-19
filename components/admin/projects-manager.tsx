@@ -7,10 +7,8 @@ import { ProjectForm, type ProjectFormValue } from "@/components/project-form";
 type ProjectItem = {
   id: string;
   name: string;
-  description: string | null;
   acronym: string | null;
-  state: string | null;
-  round: string | null;
+  round: string;
   status: string;
   plazaCount: number;
   task: { total: number; completed: number; blocked: number; overdue: number };
@@ -27,12 +25,12 @@ async function readError(res: Response): Promise<string> {
 }
 
 const thCls =
-  "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#8A97A3]";
-const tdCls = "px-3 py-2 text-sm text-[#17222C]";
+  "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#66756D]";
+const tdCls = "px-3 py-2 text-sm text-[#1C2824]";
 const btnCls =
-  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#17222C]";
+  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#1C2824]";
 const primaryBtnCls =
-  "inline-flex min-h-[44px] items-center rounded-[8px] bg-[#5E6AD2] px-4 text-sm font-semibold text-white disabled:opacity-50";
+  "inline-flex min-h-[44px] items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50";
 
 /** ADMIN projects table + create/edit forms wired to /api/projects. */
 export function ProjectsManager() {
@@ -104,7 +102,7 @@ export function ProjectsManager() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-xs text-[#5C6F7E]">
+        <p className="font-mono text-xs text-[#586760]">
           {items.length} project{items.length === 1 ? "" : "s"}
         </p>
         <button
@@ -132,16 +130,14 @@ export function ProjectsManager() {
 
       {editing ? (
         <div className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-[#17222C]">
+          <h2 className="text-sm font-semibold text-[#1C2824]">
             Edit {editing.name}
           </h2>
           <ProjectForm
             initial={{
               name: editing.name,
-              description: editing.description ?? undefined,
               acronym: editing.acronym ?? undefined,
-              state: editing.state ?? undefined,
-              round: editing.round ?? undefined,
+              round: editing.round as ProjectFormValue["round"],
               status: editing.status as ProjectFormValue["status"],
             }}
             submitLabel="Save changes"
@@ -154,19 +150,19 @@ export function ProjectsManager() {
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-[#5C6F7E]">Loading projects…</p>
+        <p className="text-sm text-[#586760]">Loading projects…</p>
       ) : error ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {error}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white">
+        <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
           <table className="w-full min-w-[720px] border-collapse">
             <thead>
-              <tr className="border-b border-[rgba(23,34,44,0.08)] bg-[#FAFBFC]">
+              <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
                 <th className={thCls}>Name</th>
                 <th className={thCls}>Acronym</th>
-                <th className={thCls}>State</th>
+                <th className={thCls}>Round</th>
                 <th className={thCls}>Status</th>
                 <th className={thCls}>Plazas</th>
                 <th className={thCls}>Tasks</th>
@@ -187,7 +183,7 @@ export function ProjectsManager() {
                 >
                   <td className={`${tdCls} font-medium`}>{p.name}</td>
                   <td className={tdCls}>{p.acronym ?? "—"}</td>
-                  <td className={tdCls}>{p.state ?? "—"}</td>
+                  <td className={tdCls}>{p.round}</td>
                   <td className={tdCls}>{p.status}</td>
                   <td className={tdCls}>{p.plazaCount}</td>
                   <td className={tdCls}>{p.task.total}</td>

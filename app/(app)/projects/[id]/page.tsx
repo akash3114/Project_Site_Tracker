@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { AppSidebar } from "@/components/app-sidebar";
 import { ProgressBar } from "@/components/progress-bar";
 
 
@@ -79,27 +78,17 @@ export default function ProjectPage() {
   }, [projectId]);
 
   return (
-    <div className="flex min-h-screen bg-[#F4F5F7] font-body text-[#17222C]">
-      <AppSidebar active="Projects" />
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-[64px] items-center gap-3 border-b border-[rgba(23,34,44,0.08)] bg-white px-4">
-          <p className="font-display text-base font-semibold tracking-[-0.02em] md:hidden">
-            Site Tracker
-          </p>
-        </header>
-
-        <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
-          <nav aria-label="Breadcrumb" className="font-mono text-xs text-[#8A97A3]">
-            <a href="/" className="hover:text-[#17222C]">Dashboard</a>
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
+          <nav aria-label="Breadcrumb" className="font-mono text-xs text-[#66756D]">
+            <a href="/" className="hover:text-[#1C2824]">Dashboard</a>
             {" / "}
-            <a href="/projects" className="hover:text-[#17222C]">Projects</a>
+            <a href="/projects" className="hover:text-[#1C2824]">Projects</a>
             {" / "}
-            <span aria-current="page" className="text-[#17222C]">{project?.name ?? "…"}</span>
+            <span aria-current="page" className="text-[#1C2824]">{project?.name ?? "…"}</span>
           </nav>
 
           {state === "loading" ? (
-            <p className="text-sm text-[#5C6F7E]">Loading…</p>
+            <p className="text-sm text-[#586760]">Loading…</p>
           ) : state === "denied" ? (
             <p role="alert" className="rounded-md border border-[#F3C2C2] bg-[#FEF2F2] p-4 text-sm text-[#991B1B]">
               You don&apos;t have access to this project.
@@ -111,18 +100,15 @@ export default function ProjectPage() {
           ) : project ? (
             <>
               <div>
-                <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#0E121B]">
+                <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#102D27]">
                   {project.acronym ? `${project.acronym} · ` : ""}{project.name}
                 </h1>
-                <p className="font-mono text-xs text-[#8A97A3]">
-                  {[project.state, project.round, project.status].filter(Boolean).join(" · ")}
+                <p className="font-mono text-xs text-[#66756D]">
+                  {[project.round, project.status].filter(Boolean).join(" · ")}
                 </p>
-                {project.description ? (
-                  <p className="font-body text-sm text-[#5C6F7E]">{project.description}</p>
-                ) : null}
                 <div className="mt-3 max-w-md">
                   <ProgressBar value={project.progressPct} />
-                  <p className="mt-1 font-mono text-xs text-[#5C6F7E]">
+                  <p className="mt-1 font-mono text-xs text-[#586760]">
                     {project.progressPct}% · {project.task.completed}/{project.task.total} done ·{" "}
                     {project.task.blocked} blocked · {project.task.overdue} overdue
                   </p>
@@ -134,22 +120,22 @@ export default function ProjectPage() {
                   <a
                     key={z.id}
                     href={`/plazas/${z.id}`}
-                    className="flex min-h-[44px] flex-col gap-2 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4 pst-transition hover:border-[#5E6AD2]/40"
+                    className="flex min-h-[44px] flex-col gap-2 rounded-[12px] border border-[#CDD6CE] bg-white p-4 pst-transition hover:border-[#173B33]/40"
                   >
                     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <span className="font-display text-base font-semibold text-[#0E121B]">
+                      <span className="font-display text-base font-semibold text-[#102D27]">
                         {z.name}
                       </span>
                       {plazaRowMeta(z) ? (
-                        <span className="font-mono text-xs text-[#8A97A3]">{plazaRowMeta(z)}</span>
+                        <span className="font-mono text-xs text-[#66756D]">{plazaRowMeta(z)}</span>
                       ) : null}
-                      <span className="ml-auto font-mono text-xs text-[#5C6F7E]">
+                      <span className="ml-auto font-mono text-xs text-[#586760]">
                         {z.task.completed}/{z.task.total}
                         {z.task.overdue > 0 ? (
-                          <span className="text-[#DC2626]"> · {z.task.overdue} overdue</span>
+                          <span className="text-[#8F2824]"> · {z.task.overdue} overdue</span>
                         ) : null}
                         {z.task.blocked > 0 ? (
-                          <span className="text-[#92400E]"> · {z.task.blocked} blocked</span>
+                          <span className="text-[#704900]"> · {z.task.blocked} blocked</span>
                         ) : null}
                       </span>
                     </div>
@@ -157,13 +143,11 @@ export default function ProjectPage() {
                   </a>
                 ))}
                 {plazas.length === 0 ? (
-                  <p className="text-sm text-[#5C6F7E]">No plazas visible in this project.</p>
+                  <p className="text-sm text-[#586760]">No plazas visible in this project.</p>
                 ) : null}
               </section>
             </>
           ) : null}
-        </main>
-      </div>
-    </div>
+    </main>
   );
 }

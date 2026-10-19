@@ -53,7 +53,7 @@ function asArray(j: unknown): unknown[] {
 async function main() {
   const SUF = Date.now().toString(36);
   const admin = await login("admin@tracker.local", "Admin@123");
-  const lead = await login("m.ravindran@tracker.local", "Tracker@123");
+  const mgmt = await login("management@tracker.local", "Manage@123");
   const site = await login("sunil.shukla@tracker.local", "Tracker@123");
   console.log("logins ok");
 
@@ -77,9 +77,9 @@ async function main() {
   const compId = (completed[0] as { id?: string } | undefined)?.id;
   if (compId) check("site reopen → 403", (await req(site, "POST", `/api/tasks/${compId}/reopen`, {})).status, 403);
   else console.log("SKIP site-reopen (no completed task in site plazas)");
-  // lead assign in-scope → 200/201/422-tolerant (assignee must hold access; use lead's own id)
-  const leadMe = await req(lead, "GET", "/api/tasks?assigneeId=me&pageSize=1");
-  check("lead tasks read", leadMe.status, 200);
+  // management assign in-scope → 200 (assignee must hold access; use management's own id)
+  const mgmtMe = await req(mgmt, "GET", "/api/tasks?assigneeId=me&pageSize=1");
+  check("management tasks read", mgmtMe.status, 200);
 
   // ── §3 completed lock ──
   const anyCompleted = asArray((await req(admin, "GET", "/api/tasks?status=COMPLETED&pageSize=1")).json);
@@ -98,7 +98,7 @@ async function main() {
 
   // events feed gated
   check("site GET /api/events → 403", (await req(site, "GET", "/api/events")).status, 403);
-  check("lead GET /api/events → 200", (await req(lead, "GET", "/api/events?take=5")).status, 200);
+  check("management GET /api/events → 200", (await req(mgmt, "GET", "/api/events?take=5")).status, 200);
 
   console.log(failures === 0 ? "ALL GREEN" : `${failures} FAILURES`);
   process.exitCode = failures === 0 ? 0 : 1;

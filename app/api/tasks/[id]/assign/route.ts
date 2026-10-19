@@ -1,7 +1,11 @@
 import type { Role } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
-import { canAssign, requirePlazaAccess } from "@/lib/access";
+import {
+  assigneeHasPlazaAccess,
+  canAssign,
+  requirePlazaAccess,
+} from "@/lib/access";
 import { db } from "@/lib/db";
 import { assignSchema } from "@/lib/validations";
 
@@ -38,33 +42,25 @@ export async function POST(
     }
     const { assigneeId } = parsed.data;
 
-    const task = await db.task.findUnique({ where: { id: params.id } });
+    const task = await db.task.findUnique({
+      where: { id: params.id },
+      select: { id: true, status: true, plazaId: true, plaza: { select: { projectId: true } } },
+    });
     if (!task) return Response.json({ error: "Not found" }, { status: 404 });
 
     await requirePlazaAccess(user, task.plazaId);
 
-    const assignee = await db.user.findUnique({
-      where: { id: assigneeId },
-      select: { id: true, role: true, active: true },
-    });
-    if (!assignee || !assignee.active) {
+    if (
+      !(await assigneeHasPlazaAccess(
+        assigneeId,
+        task.plazaId,
+        task.plaza.projectId,
+      ))
+    ) {
       return Response.json(
         { error: "Assignee has no access to this plaza" },
         { status: 422 },
       );
-    }
-    if (assignee.role !== "ADMIN") {
-      const hit = await db.userPlazaAccess.findUnique({
-        where: {
-          userId_plazaId: { userId: assigneeId, plazaId: task.plazaId },
-        },
-      });
-      if (!hit) {
-        return Response.json(
-          { error: "Assignee has no access to this plaza" },
-          { status: 422 },
-        );
-      }
     }
 
     const updated = await db.$transaction(async (tx) => {

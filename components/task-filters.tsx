@@ -26,7 +26,7 @@ const STATUSES: TaskStatusFilter[] = [
 const PRIORITIES: TaskPriorityFilter[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
 function selectClass(extra = "") {
-  return `min-h-[44px] rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white px-3 font-body text-sm text-[#17222C] pst-transition ${extra}`;
+  return `min-h-[44px] rounded-[6px] border border-[#CDD6CE] bg-white px-3 font-body text-sm text-[#1C2824] pst-transition ${extra}`;
 }
 
 /**
@@ -53,7 +53,7 @@ export function TaskFiltersBar({
         placeholder="Search tasks…"
         value={filters.q ?? ""}
         onChange={(e) => onChange({ ...filters, q: e.target.value })}
-        className="min-h-[44px] min-w-[180px] flex-1 rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white px-3 font-body text-sm text-[#17222C] placeholder:text-[#8A97A3] md:max-w-xs"
+        className="min-h-[44px] min-w-[180px] flex-1 rounded-[6px] border border-[#CDD6CE] bg-white px-3 font-body text-sm text-[#1C2824] placeholder:text-[#66756D] md:max-w-xs"
       />
       <select
         aria-label="Filter by status"
@@ -118,8 +118,8 @@ export function TaskFiltersBar({
         }
         className={`min-h-[44px] rounded-[6px] border px-3 font-body text-sm pst-transition ${
           filters.overdueOnly
-            ? "border-[#DC2626] bg-[#FEF2F2] font-medium text-[#DC2626]"
-            : "border-[rgba(23,34,44,0.08)] bg-white text-[#5C6F7E] hover:text-[#17222C]"
+            ? "border-[#8F2824] bg-[#FEF2F2] font-medium text-[#8F2824]"
+            : "border-[#CDD6CE] bg-white text-[#586760] hover:text-[#1C2824]"
         }`}
       >
         Overdue only
@@ -128,7 +128,7 @@ export function TaskFiltersBar({
         <button
           type="button"
           onClick={() => onChange({})}
-          className="min-h-[44px] rounded-[6px] px-3 font-body text-sm text-[#5C6F7E] pst-transition hover:text-[#17222C]"
+          className="min-h-[44px] rounded-[6px] px-3 font-body text-sm text-[#586760] pst-transition hover:text-[#1C2824]"
         >
           Clear
         </button>

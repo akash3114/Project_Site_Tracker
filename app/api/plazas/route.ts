@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { accessiblePlazaIds, getSessionUser } from "@/lib/access";
+import { accessiblePlazaIds, canManage, getSessionUser } from "@/lib/access";
 import { db } from "@/lib/db";
 import { plazaProgress } from "@/lib/progress";
 import { plazaSchema } from "@/lib/validations";
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   const plazas = await db.plaza.findMany({
     where: {
       ...(projectId ? { projectId } : null),
-      ...(user.role === "ADMIN" ? null : { id: { in: visible } }),
+      ...(user.role === "MANAGER" ? { id: { in: visible } } : null),
     },
     include: { project: { select: { id: true, name: true } } },
     orderBy: { name: "asc" },
@@ -45,9 +45,6 @@ export async function GET(req: Request) {
         projectId: plaza.projectId,
         project: plaza.project,
         name: plaza.name,
-        chainage: plaza.chainage,
-        highway: plaza.highway,
-        location: plaza.location,
         lengthKm: plaza.lengthKm,
         state: plaza.state,
         piu: plaza.piu,
@@ -63,11 +60,11 @@ export async function GET(req: Request) {
   return NextResponse.json(items);
 }
 
-/** POST /api/plazas → ADMIN only. 409 on (projectId, name) duplicate. */
+/** POST /api/plazas → ADMIN + MANAGEMENT. 409 on (projectId, name) duplicate. */
 export async function POST(req: Request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ADMIN")
+  if (!canManage(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body: unknown = await req.json().catch(() => null);
@@ -103,9 +100,6 @@ export async function POST(req: Request) {
       data: {
         projectId: parsed.data.projectId,
         name: parsed.data.name,
-        chainage: parsed.data.chainage,
-        highway: parsed.data.highway,
-        location: parsed.data.location,
         lengthKm: parsed.data.lengthKm,
         state: parsed.data.state,
         piu: parsed.data.piu,

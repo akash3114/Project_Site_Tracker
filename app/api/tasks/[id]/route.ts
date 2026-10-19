@@ -25,7 +25,7 @@ const detailInclude = {
       state: true,
       piu: true,
       ro: true,
-      project: { select: { id: true, name: true, acronym: true, state: true } },
+      project: { select: { id: true, name: true, acronym: true, round: true } },
     },
   },
   assignee: { select: { id: true, name: true } },

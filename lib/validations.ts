@@ -9,49 +9,63 @@ export type LoginInput = z.infer<typeof loginSchema>;
 
 export const projectSchema = z.object({
   name: z.string().min(3).max(150),
-  description: z.string().max(2000).optional(),
   acronym: z.string().max(20).optional(),
-  state: z.string().max(100).optional(),
-  round: z.string().max(50).optional(),
+  round: z.enum(["ROUND_1", "ROUND_2", "ROUND_3", "ROUND_4"]),
   status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED"]).optional(),
 });
+
+export const updateProjectSchema = projectSchema.partial();
 
 const emptyToUndefinedNumber = (v: unknown) =>
   v === "" || v === null || v === undefined ? undefined : v;
 
+const emptyToUndefined = (v: unknown) => (v === "" ? undefined : v);
+
 export const plazaSchema = z.object({
   projectId: z.string().cuid(),
   name: z.string().min(3).max(150),
-  chainage: z.string().max(50).optional(),
-  highway: z.string().max(50).optional(),
-  location: z.string().max(150).optional(),
-  lengthKm: z.preprocess(emptyToUndefinedNumber, z.coerce.number().positive().max(100000).optional()),
-  state: z.string().max(100).optional(),
-  piu: z.string().max(150).optional(),
-  ro: z.string().max(150).optional(),
+  state: z.preprocess(emptyToUndefined, z.string().max(100).optional()),
+  piu: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
+  ro: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
+  lengthKm: z.preprocess(
+    emptyToUndefinedNumber,
+    z.coerce.number().positive().max(100000).optional(),
+  ),
   status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED"]).optional(),
 });
+
+export const updatePlazaSchema = plazaSchema
+  .omit({ projectId: true })
+  .partial();
 
 export const userSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email(),
+  phone: z.string().max(30).optional(),
   password: z.string().min(6),
-  role: z.enum(["ADMIN", "PROJECT_LEAD", "SITE_USER"]),
+  role: z.enum(["ADMIN", "MANAGEMENT", "MANAGER"]),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().min(2).max(100).optional(),
-  role: z.enum(["ADMIN", "PROJECT_LEAD", "SITE_USER"]).optional(),
+  phone: z.string().max(30).nullable().optional(),
+  role: z.enum(["ADMIN", "MANAGEMENT", "MANAGER"]).optional(),
   active: z.boolean().optional(),
   password: z.string().min(6).optional(),
 });
 
-export const accessSchema = z.object({
+export const projectAssignmentSchema = z.object({
+  projectId: z.string().cuid(),
   userId: z.string().cuid(),
-  plazaIds: z.array(z.string().cuid()),
+  isPrimary: z.boolean().default(false),
 });
 
-const emptyToUndefined = (v: unknown) => (v === "" ? undefined : v);
+export const plazaAssignmentSchema = z.object({
+  plazaId: z.string().cuid(),
+  userId: z.string().cuid(),
+  role: z.enum(["TOLL", "MAINTENANCE", "CORRIDOR"]),
+  isPrimary: z.boolean().default(false),
+});
 
 export const createTaskSchema = z.object({
   plazaId: z.string().cuid(),
@@ -70,7 +84,10 @@ export const createTaskSchema = z.object({
 
 export const updateTaskSchema = z.object({
   title: z.string().min(3).max(200).optional(),
-  description: z.preprocess(emptyToUndefined, z.string().max(5000).nullable().optional()),
+  description: z.preprocess(
+    emptyToUndefined,
+    z.string().max(5000).nullable().optional(),
+  ),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   dueDate: z.preprocess(
     emptyToUndefined,
@@ -97,4 +114,15 @@ export const commentSchema = z.object({
 
 export const reopenSchema = z.object({
   text: z.string().max(2000).optional(),
+});
+
+export const plazaAssignmentInputSchema = z.object({
+  plazaId: z.string().cuid(),
+  role: z.enum(["TOLL", "MAINTENANCE", "CORRIDOR"]),
+  isPrimary: z.boolean().default(false),
+});
+
+export const accessPutSchema = z.object({
+  userId: z.string().cuid(),
+  assignments: z.array(plazaAssignmentInputSchema).max(500),
 });

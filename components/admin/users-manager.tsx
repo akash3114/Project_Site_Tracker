@@ -6,7 +6,8 @@ type UserItem = {
   id: string;
   name: string;
   email: string;
-  role: "ADMIN" | "PROJECT_LEAD" | "SITE_USER";
+  phone: string | null;
+  role: "ADMIN" | "MANAGEMENT" | "MANAGER";
   active: boolean;
   plazaIds: string[];
 };
@@ -21,12 +22,12 @@ async function readError(res: Response): Promise<string> {
 }
 
 const inputCls =
-  "min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm text-[#17222C] placeholder:text-[#8A97A3]";
+  "min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm text-[#1C2824] placeholder:text-[#66756D]";
 const thCls =
-  "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#8A97A3]";
-const tdCls = "px-3 py-2 text-sm text-[#17222C]";
+  "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#66756D]";
+const tdCls = "px-3 py-2 text-sm text-[#1C2824]";
 const btnCls =
-  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#17222C] disabled:opacity-50";
+  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#1C2824] disabled:opacity-50";
 
 /** ADMIN users table + create/deactivate/reset wired to /api/users. */
 export function UsersManager() {
@@ -38,7 +39,7 @@ export function UsersManager() {
     name: "",
     email: "",
     password: "",
-    role: "SITE_USER",
+    role: "MANAGER",
   });
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState("");
@@ -95,7 +96,7 @@ export function UsersManager() {
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error(await readError(res));
-      setForm({ name: "", email: "", password: "", role: "SITE_USER" });
+      setForm({ name: "", email: "", password: "", role: "MANAGER" });
       setShowCreate(false);
       setNotice("User created");
       await load();
@@ -120,7 +121,7 @@ export function UsersManager() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-xs text-[#5C6F7E]">
+        <p className="font-mono text-xs text-[#586760]">
           {items.length} user{items.length === 1 ? "" : "s"} (no delete —
           deactivate only)
         </p>
@@ -130,15 +131,15 @@ export function UsersManager() {
             setShowCreate((v) => !v);
             setFormError(null);
           }}
-          className="inline-flex min-h-[44px] items-center rounded-[8px] bg-[#5E6AD2] px-4 text-sm font-semibold text-white"
+          className="inline-flex min-h-[44px] items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white"
         >
           New user
         </button>
       </div>
 
-      {notice ? <p className="text-sm text-[#166534]">{notice}</p> : null}
+      {notice ? <p className="text-sm text-[#385A2B]">{notice}</p> : null}
       {formError ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {formError}
         </p>
       ) : null}
@@ -146,9 +147,9 @@ export function UsersManager() {
       {showCreate ? (
         <form
           onSubmit={create}
-          className="grid grid-cols-1 gap-3 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4 md:grid-cols-2"
+          className="grid grid-cols-1 gap-3 rounded-[12px] border border-[#CDD6CE] bg-white p-4 md:grid-cols-2"
         >
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Name
             <input
               className={inputCls}
@@ -158,7 +159,7 @@ export function UsersManager() {
               minLength={2}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Email
             <input
               className={inputCls}
@@ -168,7 +169,7 @@ export function UsersManager() {
               required
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Password
             <input
               className={inputCls}
@@ -179,15 +180,15 @@ export function UsersManager() {
               minLength={6}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#17222C]">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Role
             <select
               className={inputCls}
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}
             >
-              <option value="SITE_USER">SITE_USER</option>
-              <option value="PROJECT_LEAD">PROJECT_LEAD</option>
+              <option value="MANAGER">MANAGER</option>
+              <option value="MANAGEMENT">MANAGEMENT</option>
               <option value="ADMIN">ADMIN</option>
             </select>
           </label>
@@ -195,7 +196,7 @@ export function UsersManager() {
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex min-h-[44px] items-center rounded-[8px] bg-[#5E6AD2] px-4 text-sm font-semibold text-white disabled:opacity-50"
+              className="inline-flex min-h-[44px] items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
             >
               {saving ? "Saving…" : "Create user"}
             </button>
@@ -211,16 +212,16 @@ export function UsersManager() {
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-[#5C6F7E]">Loading users…</p>
+        <p className="text-sm text-[#586760]">Loading users…</p>
       ) : error ? (
-        <p role="alert" className="text-sm text-[#DC2626]">
+        <p role="alert" className="text-sm text-[#8F2824]">
           {error}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white">
+        <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
           <table className="w-full min-w-[820px] border-collapse">
             <thead>
-              <tr className="border-b border-[rgba(23,34,44,0.08)] bg-[#FAFBFC]">
+              <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
                 <th className={thCls}>Name</th>
                 <th className={thCls}>Email</th>
                 <th className={thCls}>Role</th>
@@ -247,8 +248,8 @@ export function UsersManager() {
                         void patch(u.id, { role: e.target.value })
                       }
                     >
-                      <option value="SITE_USER">SITE_USER</option>
-                      <option value="PROJECT_LEAD">PROJECT_LEAD</option>
+                      <option value="MANAGER">MANAGER</option>
+                      <option value="MANAGEMENT">MANAGEMENT</option>
                       <option value="ADMIN">ADMIN</option>
                     </select>
                   </td>
@@ -291,7 +292,7 @@ export function UsersManager() {
                           type="button"
                           disabled={saving}
                           onClick={() => void resetPassword(u.id)}
-                          className="inline-flex min-h-[44px] shrink-0 items-center rounded-[8px] bg-[#5E6AD2] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                          className="inline-flex min-h-[44px] shrink-0 items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
                         >
                           Set
                         </button>

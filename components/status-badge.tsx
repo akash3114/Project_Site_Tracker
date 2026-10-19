@@ -4,9 +4,9 @@ export type TaskStatus = "todo" | "in_progress" | "blocked" | "completed";
 
 const STATUS_STYLES: Record<TaskStatus, string> = {
   todo: "bg-slate-500/10 text-slate-600 border-slate-500/25",
-  in_progress: "bg-[#5E6AD2]/10 text-[#5E6AD2] border-[#5E6AD2]/30",
-  blocked: "bg-[#FEF3C7] text-[#92400E] border-amber-500/40",
-  completed: "bg-[#DCFCE7] text-[#166534] border-green-500/40",
+  in_progress: "bg-[#173B33]/10 text-[#173B33] border-[#173B33]/30",
+  blocked: "bg-[#FFF1CC] text-[#704900] border-amber-500/40",
+  completed: "bg-[#E8F0DD] text-[#385A2B] border-green-500/40",
 };
 
 const STATUS_LABELS: Record<TaskStatus, string> = {

@@ -1,6 +1,9 @@
 # ACCEPTANCE — Project Site Tracker Pilot (T-042)
 
-Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/27/40
+> v2 design: `docs/DATABASE.md` is the source of truth (roles ADMIN | MANAGEMENT | MANAGER,
+> project/plaza assignments). Seed: 28 projects / 46 plazas / ~94 users / 40 tasks.
+
+Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 28/46/94/40
 
 ## A. Automated (must all be green)
 - [ ] `npm.cmd run lint` clean

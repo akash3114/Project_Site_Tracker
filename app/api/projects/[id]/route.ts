@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { accessiblePlazaIds, getSessionUser } from "@/lib/access";
+import { accessiblePlazaIds, canManage, getSessionUser } from "@/lib/access";
 import { db } from "@/lib/db";
 import { projectStats } from "@/lib/stats";
-import { projectSchema } from "@/lib/validations";
+import { updateProjectSchema } from "@/lib/validations";
 
 type Ctx = { params: { id: string } };
 
@@ -17,7 +17,7 @@ export async function GET(_req: Request, { params }: Ctx) {
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const visible = await accessiblePlazaIds(user.id, user.role);
-  if (user.role !== "ADMIN") {
+  if (user.role === "MANAGER") {
     const inScope = await db.plaza.findFirst({
       where: { projectId: project.id, id: { in: visible } },
       select: { id: true },
@@ -30,9 +30,7 @@ export async function GET(_req: Request, { params }: Ctx) {
   return NextResponse.json({
     id: project.id,
     name: project.name,
-    description: project.description,
     acronym: project.acronym,
-    state: project.state,
     round: project.round,
     status: project.status,
     plazaCount: s.plazaCount,
@@ -48,31 +46,33 @@ export async function GET(_req: Request, { params }: Ctx) {
   });
 }
 
-/** PATCH /api/projects/:id → ADMIN only. 409 on duplicate name. */
+/** PATCH /api/projects/:id → ADMIN + MANAGEMENT. 409 on (name, round) clash. */
 export async function PATCH(req: Request, { params }: Ctx) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ADMIN")
+  if (!canManage(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const project = await db.project.findUnique({ where: { id: params.id } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body: unknown = await req.json().catch(() => null);
-  const parsed = projectSchema.partial().safeParse(body);
+  const parsed = updateProjectSchema.safeParse(body);
   if (!parsed.success)
     return NextResponse.json(
       { error: "Invalid input", issues: parsed.error.issues },
       { status: 400 },
     );
 
-  if (parsed.data.name && parsed.data.name !== project.name) {
-    const dup = await db.project.findUnique({
-      where: { name: parsed.data.name },
+  const nextName = parsed.data.name ?? project.name;
+  const nextRound = parsed.data.round ?? project.round;
+  if (nextName !== project.name || nextRound !== project.round) {
+    const dup = await db.project.findFirst({
+      where: { name: nextName, round: nextRound, id: { not: project.id } },
     });
     if (dup)
       return NextResponse.json(
-        { error: "Project name already exists" },
+        { error: "Project already exists in this round" },
         { status: 409 },
       );
   }
@@ -86,7 +86,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
       return NextResponse.json(
-        { error: "Project name already exists" },
+        { error: "Project already exists in this round" },
         { status: 409 },
       );
     throw e;

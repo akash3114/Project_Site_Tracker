@@ -30,15 +30,15 @@ export function useRole(): string | null | false {
   return role;
 }
 
-/** Shared sidebar. Admin link hidden from SITE_USER (no more dead-end nav). */
+/** Shared secondary navigation for non-dashboard pages. */
 export function AppSidebar({ active }: { active: NavKey }) {
   const role = useRole();
   const items: NavKey[] = ["Dashboard", "My Tasks", "Projects"];
-  if (role === "ADMIN" || role === "PROJECT_LEAD") items.push("Admin");
+  if (role === "ADMIN" || role === "MANAGEMENT") items.push("Admin");
   return (
     <aside
       aria-label="Primary navigation"
-      className="hidden w-60 shrink-0 flex-col gap-2 border-r border-[rgba(23,34,44,0.08)] bg-[#0E121B] p-4 text-white md:flex"
+      className="hidden w-60 shrink-0 flex-col gap-2 border-r border-[#CDD6CE] bg-[#102D27] p-4 text-white md:flex"
     >
       <p className="font-display text-lg font-semibold tracking-[-0.02em]">Site Tracker</p>
       <nav className="mt-4 flex flex-col gap-1">
@@ -48,10 +48,12 @@ export function AppSidebar({ active }: { active: NavKey }) {
             href={item === "Dashboard" ? "/" : `/${item.toLowerCase().replace(" ", "-")}`}
             aria-current={item === active ? "page" : undefined}
             className={`flex min-h-[44px] items-center rounded-[6px] px-3 text-sm pst-transition hover:bg-white/10 ${
-              item === active ? "bg-[#5E6AD2] font-semibold text-white" : "text-white/70"
+              item === active
+                ? "bg-[#CBEA72] font-semibold text-[#102D27]"
+                : "text-white/70"
             }`}
           >
-            {item}
+            {item === "Dashboard" ? (role === "MANAGER" ? "My Work" : "Portfolio") : item}
           </a>
         ))}
       </nav>

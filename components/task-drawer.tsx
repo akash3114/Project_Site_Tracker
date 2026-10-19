@@ -34,8 +34,8 @@ const STATUS_PROGRESS: Record<TaskStatus, number> = {
 
 function toastClass(tone: "ok" | "err") {
   return tone === "ok"
-    ? "border-green-500/40 bg-[#DCFCE7] text-[#166534]"
-    : "border-red-500/40 bg-[#FEE2E2] text-[#991B1B]";
+    ? "border-green-500/40 bg-[#E8F0DD] text-[#385A2B]"
+    : "border-red-500/40 bg-[#FBE8E4] text-[#991B1B]";
 }
 
 /**
@@ -159,15 +159,15 @@ export function TaskDrawer({
         onClick={(e) => e.stopPropagation()}
         className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-white shadow-xl"
       >
-        <div className="flex min-h-[64px] items-center gap-3 border-b border-[rgba(23,34,44,0.08)] px-4">
-          <h2 className="truncate font-display text-base font-semibold tracking-[-0.02em] text-[#17222C]">
+        <div className="flex min-h-[64px] items-center gap-3 border-b border-[#CDD6CE] px-4">
+          <h2 className="truncate font-display text-base font-semibold tracking-[-0.02em] text-[#1C2824]">
             {task?.title ?? "Loading…"}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close task drawer"
-            className="ml-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[6px] font-body text-sm text-[#5C6F7E] pst-transition hover:bg-[#FAFBFC] hover:text-[#17222C]"
+            className="ml-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[6px] font-body text-sm text-[#586760] pst-transition hover:bg-[#FAFBFC] hover:text-[#1C2824]"
           >
             ✕
           </button>
@@ -184,14 +184,14 @@ export function TaskDrawer({
           ) : null}
 
           {loading || !task ? (
-            <p className="font-body text-sm text-[#5C6F7E]">Loading task…</p>
+            <p className="font-body text-sm text-[#586760]">Loading task…</p>
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={task.status} />
                 <PriorityBadge priority={task.priority} />
                 <span
-                  className={`font-mono text-xs ${overdue ? "font-medium text-[#DC2626]" : "text-[#5C6F7E]"}`}
+                  className={`font-mono text-xs ${overdue ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}
                 >
                   Due {fmtDate(task.dueDate)}
                   {overdue ? " · overdue" : ""}
@@ -199,17 +199,17 @@ export function TaskDrawer({
               </div>
               <ProgressBar value={STATUS_PROGRESS[task.status] ?? 0} />
               {task.description ? (
-                <p className="font-body text-sm text-[#17222C]">
+                <p className="font-body text-sm text-[#1C2824]">
                   {task.description}
                 </p>
               ) : null}
-              <p className="font-mono text-xs text-[#8A97A3]">
+              <p className="font-mono text-xs text-[#66756D]">
                 {task.plaza?.project?.name ?? ""} · {task.plaza?.name ?? ""} ·
                 Assignee: {task.assignee?.name ?? "Unassigned"}
               </p>
 
               <section aria-label="Status" className="flex flex-col gap-2">
-                <h3 className="font-display text-sm font-semibold text-[#17222C]">
+                <h3 className="font-display text-sm font-semibold text-[#1C2824]">
                   Status
                 </h3>
                 <StatusStepper
@@ -223,7 +223,7 @@ export function TaskDrawer({
               </section>
 
               <section aria-label="Assignee" className="flex flex-col gap-2">
-                <h3 className="font-display text-sm font-semibold text-[#17222C]">
+                <h3 className="font-display text-sm font-semibold text-[#1C2824]">
                   Assignee
                 </h3>
                 <select
@@ -238,7 +238,7 @@ export function TaskDrawer({
                       "Assignee updated",
                     );
                   }}
-                  className="min-h-[44px] rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white px-3 font-body text-sm text-[#17222C] disabled:opacity-60"
+                  className="min-h-[44px] rounded-[6px] border border-[#CDD6CE] bg-white px-3 font-body text-sm text-[#1C2824] disabled:opacity-60"
                 >
                   <option value="">Select assignee…</option>
                   {assignees.map((a) => (
@@ -250,7 +250,7 @@ export function TaskDrawer({
               </section>
 
               <section aria-label="Reopen" className="flex flex-col gap-2">
-                <h3 className="font-display text-sm font-semibold text-[#17222C]">
+                <h3 className="font-display text-sm font-semibold text-[#1C2824]">
                   Reopen
                 </h3>
                 <input
@@ -258,7 +258,7 @@ export function TaskDrawer({
                   placeholder="Reopen note (optional)"
                   value={reopenText}
                   onChange={(e) => setReopenText(e.target.value)}
-                  className="min-h-[44px] rounded-[6px] border border-[rgba(23,34,44,0.08)] bg-white px-3 font-body text-sm text-[#17222C] placeholder:text-[#8A97A3]"
+                  className="min-h-[44px] rounded-[6px] border border-[#CDD6CE] bg-white px-3 font-body text-sm text-[#1C2824] placeholder:text-[#66756D]"
                 />
                 <button
                   type="button"
@@ -272,14 +272,14 @@ export function TaskDrawer({
                       if (ok) setReopenText("");
                     })
                   }
-                  className="min-h-[44px] rounded-[6px] border border-[rgba(23,34,44,0.08)] px-4 font-body text-sm text-[#17222C] pst-transition hover:border-[#5E6AD2] disabled:opacity-60"
+                  className="min-h-[44px] rounded-[6px] border border-[#CDD6CE] px-4 font-body text-sm text-[#1C2824] pst-transition hover:border-[#173B33] disabled:opacity-60"
                 >
                   Reopen task
                 </button>
               </section>
 
               <section aria-label="Activity" className="flex flex-col gap-2">
-                <h3 className="font-display text-sm font-semibold text-[#17222C]">
+                <h3 className="font-display text-sm font-semibold text-[#1C2824]">
                   Activity ({events.length})
                 </h3>
                 <ActivityFeed events={events} />

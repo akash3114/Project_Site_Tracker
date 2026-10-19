@@ -7,19 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Access level. Job title (PM / Toll / Maintenance / Corridor) lives on the
+// assignment rows, not here: one person can hold different jobs per site.
 model User {
-  id           String            @id @default(cuid())
+  id           String   @id @default(cuid())
   name         String
-  email        String            @unique
+  email        String   @unique
+  phone        String?
   passwordHash String
-  role         Role              @default(SITE_USER)
-  active       Boolean           @default(true)
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  accesses     UserPlazaAccess[]
-  assignedTasks Task[]           @relation("Assignee")
-  createdTasks  Task[]           @relation("Creator")
-  events        TaskEvent[]
+  role         Role     @default(MANAGER)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projectAssignments ProjectAssignment[]
+  plazaAssignments   PlazaAssignment[]
+  assignedTasks      Task[]              @relation("Assignee")
+  createdTasks       Task[]              @relation("Creator")
+  events             TaskEvent[]
 
   @@index([role])
   @@index([active])
@@ -27,24 +32,36 @@ model User {
 
 enum Role {
   ADMIN
-  PROJECT_LEAD
-  SITE_USER
+  MANAGEMENT
+  MANAGER
 }
 
 model Project {
-  id          String       @id @default(cuid())
-  name        String       @unique
-  description String?
-  acronym     String?
-  state       String?
-  round       String?
-  status      MasterStatus @default(ACTIVE)
-  plazas      Plaza[]
-  createdById String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id        String       @id @default(cuid())
+  name      String
+  acronym   String?
+  round     Round
+  status    MasterStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
+  plazas      Plaza[]
+  assignments ProjectAssignment[]
+
+  // Canonical identity after Excel cleaning (see scripts/parse-nhit.py:
+  // AS folds into Palanpur, Amravati x3 merges). Acronym stays non-unique
+  // (AAN x3, RSB x2) and is display/search only.
+  @@unique([name, round])
+  @@index([round])
   @@index([status])
+  @@index([acronym])
+}
+
+enum Round {
+  ROUND_1
+  ROUND_2
+  ROUND_3
+  ROUND_4
 }
 
 enum MasterStatus {
@@ -58,35 +75,60 @@ model Plaza {
   projectId String
   project   Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
   name      String
-  chainage  String?
-  highway   String?
-  location  String?
-  lengthKm  Float?
   state     String?
   piu       String?
   ro        String?
+  lengthKm  Float?
   status    MasterStatus @default(ACTIVE)
-  accesses  UserPlazaAccess[]
-  tasks     Task[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+
+  assignments PlazaAssignment[]
+  tasks       Task[]
 
   @@unique([projectId, name])
   @@index([projectId])
   @@index([status])
 }
 
-model UserPlazaAccess {
-  userId      String
-  plazaId     String
-  grantedById String?
-  grantedAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plaza       Plaza    @relation(fields: [plazaId], references: [id], onDelete: Cascade)
+// Project team. Role is always PROJECT_MANAGER (one primary per project).
+model ProjectAssignment {
+  projectId    String
+  userId       String
+  isPrimary    Boolean  @default(false)
+  assignedById String?
+  assignedAt   DateTime @default(now())
 
-  @@id([userId, plazaId])
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([projectId])
   @@index([userId])
+}
+
+// Plaza team + access control. PK includes role so one user can hold
+// several jobs on the same plaza. Vacant post = no row.
+model PlazaAssignment {
+  plazaId      String
+  userId       String
+  role         PlazaRole
+  isPrimary    Boolean   @default(false)
+  assignedById String?
+  assignedAt   DateTime  @default(now())
+
+  plaza Plaza @relation(fields: [plazaId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([plazaId, userId, role])
   @@index([plazaId])
+  @@index([userId])
+}
+
+enum PlazaRole {
+  TOLL
+  MAINTENANCE
+  CORRIDOR
 }
 
 model Task {

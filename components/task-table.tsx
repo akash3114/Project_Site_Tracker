@@ -18,9 +18,9 @@ export type PlazaTaskItem = {
 
 const PRIORITY_STYLES: Record<string, string> = {
   LOW: "bg-slate-500/10 text-slate-600 border-slate-500/25",
-  MEDIUM: "bg-[#5E6AD2]/10 text-[#5E6AD2] border-[#5E6AD2]/30",
-  HIGH: "bg-[#FEF3C7] text-[#92400E] border-amber-500/40",
-  CRITICAL: "bg-[#FEE2E2] text-[#DC2626] border-red-500/40",
+  MEDIUM: "bg-[#173B33]/10 text-[#173B33] border-[#173B33]/30",
+  HIGH: "bg-[#FFF1CC] text-[#704900] border-amber-500/40",
+  CRITICAL: "bg-[#FBE8E4] text-[#8F2824] border-red-500/40",
 };
 
 export function PriorityBadge({ priority }: { priority: string }) {
@@ -48,7 +48,7 @@ export function TaskTable({
 }) {
   if (tasks.length === 0) {
     return (
-      <p className="rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-8 text-center font-body text-sm text-[#5C6F7E]">
+      <p className="rounded-[12px] border border-[#CDD6CE] bg-white p-8 text-center font-body text-sm text-[#586760]">
         No tasks match these filters.
       </p>
     );
@@ -56,10 +56,10 @@ export function TaskTable({
   return (
     <>
       {/* Desktop / tablet table */}
-      <div className="hidden overflow-x-auto rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white shadow-[0_1px_2px_rgba(23,34,44,0.04)] md:block">
+      <div className="hidden overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white shadow-[0_1px_2px_rgba(23,34,44,0.04)] md:block">
         <table className="w-full min-w-[720px] text-left font-body text-sm">
           <thead>
-            <tr className="border-b border-[rgba(23,34,44,0.08)] font-mono text-xs uppercase text-[#5C6F7E]">
+            <tr className="border-b border-[#CDD6CE] font-mono text-xs uppercase text-[#586760]">
               <th scope="col" className="p-4 font-medium">
                 Status
               </th>
@@ -91,29 +91,29 @@ export function TaskTable({
                     if (e.key === "Enter" || e.key === " ") onSelect(task.id);
                   }}
                   tabIndex={0}
-                  className="cursor-pointer border-b border-[rgba(23,34,44,0.08)] pst-transition last:border-0 hover:bg-[#FAFBFC]"
+                  className="cursor-pointer border-b border-[#CDD6CE] pst-transition last:border-0 hover:bg-[#FAFBFC]"
                 >
                   <td className="p-4">
                     <StatusBadge status={task.status} />
                   </td>
                   <td className="p-4">
-                    <span className="font-medium text-[#17222C]">
+                    <span className="font-medium text-[#1C2824]">
                       {task.title}
                     </span>
                   </td>
-                  <td className="p-4 text-[#17222C]">
+                  <td className="p-4 text-[#1C2824]">
                     {task.assignee?.name ?? "—"}
                   </td>
                   <td className="p-4">
                     <PriorityBadge priority={task.priority} />
                   </td>
                   <td
-                    className={`p-4 font-mono text-xs ${overdue ? "font-medium text-[#DC2626]" : "text-[#5C6F7E]"}`}
+                    className={`p-4 font-mono text-xs ${overdue ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}
                   >
                     {fmtDate(task.dueDate)}
                     {overdue ? " · overdue" : ""}
                   </td>
-                  <td className="p-4 font-mono text-xs text-[#5C6F7E]">
+                  <td className="p-4 font-mono text-xs text-[#586760]">
                     {fmtDate(task.updatedAt)}
                   </td>
                 </tr>
@@ -132,19 +132,19 @@ export function TaskTable({
               key={task.id}
               type="button"
               onClick={() => onSelect(task.id)}
-              className="flex min-h-[44px] flex-col gap-2 rounded-[12px] border border-[rgba(23,34,44,0.08)] bg-white p-4 text-left shadow-[0_1px_2px_rgba(23,34,44,0.04)]"
+              className="flex min-h-[44px] flex-col gap-2 rounded-[12px] border border-[#CDD6CE] bg-white p-4 text-left shadow-[0_1px_2px_rgba(23,34,44,0.04)]"
             >
               <span className="flex items-center justify-between gap-2">
                 <StatusBadge status={task.status} />
                 <PriorityBadge priority={task.priority} />
               </span>
-              <span className="font-display text-base font-semibold tracking-[-0.02em] text-[#17222C]">
+              <span className="font-display text-base font-semibold tracking-[-0.02em] text-[#1C2824]">
                 {task.title}
               </span>
-              <span className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-[#5C6F7E]">
+              <span className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-[#586760]">
                 <span>{task.assignee?.name ?? "Unassigned"}</span>
                 <span
-                  className={overdue ? "font-medium text-[#DC2626]" : undefined}
+                  className={overdue ? "font-medium text-[#8F2824]" : undefined}
                 >
                   Due {fmtDate(task.dueDate)}
                   {overdue ? " · overdue" : ""}
