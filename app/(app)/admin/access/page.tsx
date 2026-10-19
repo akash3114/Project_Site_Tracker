@@ -30,7 +30,7 @@ export default async function AdminAccessPage() {
       <PageHeader
         overline="Administration"
         title="Access matrix"
-        subtitle="Pick a user, tick plazas, save. Replaces mappings in one transaction."
+        subtitle="Pick a user, set their projects and plaza job titles, then save in one transaction."
       />
       <AccessManager />
     </main>

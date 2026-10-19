@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { PlazaRole } from "@prisma/client";
+
+import { PLAZA_ROLE_LABELS, PLAZA_ROLE_OPTIONS, roleLabel } from "@/lib/labels";
 
 type UserItem = { id: string; name: string; email: string; role: string };
 type PlazaItem = {
@@ -10,7 +13,6 @@ type PlazaItem = {
   project?: { id: string; name: string };
 };
 type ProjectItem = { id: string; name: string; round: string };
-type PlazaRole = "TOLL" | "MAINTENANCE" | "CORRIDOR";
 
 type Checked = Record<string, PlazaRole>; // plazaId -> role
 
@@ -210,7 +212,7 @@ export function AccessManager() {
         >
           {users.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.name} — {u.email} ({u.role})
+              {u.name} — {u.email} ({roleLabel(u.role)})
             </option>
           ))}
         </select>
@@ -218,7 +220,7 @@ export function AccessManager() {
 
       <fieldset className="rounded-[12px] border border-[#CDD6CE] bg-white p-4">
         <legend className="px-1 text-sm font-semibold text-[#1C2824]">
-          Project Manager of ({pmProjects.length}/{projects.length})
+          Project Manager ({pmProjects.length} of {projects.length})
         </legend>
         <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
           {projects.map((p) => (
@@ -269,16 +271,18 @@ export function AccessManager() {
                   </label>
                   {checked[z.id] ? (
                     <select
-                      aria-label={`Role at ${z.name}`}
+                      aria-label={`Job title at ${z.name}`}
                       className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-2 text-sm"
                       value={checked[z.id]}
                       onChange={(e) =>
                         setRole(z.id, e.target.value as PlazaRole)
                       }
                     >
-                      <option value="TOLL">TOLL</option>
-                      <option value="MAINTENANCE">MAINTENANCE</option>
-                      <option value="CORRIDOR">CORRIDOR</option>
+                      {PLAZA_ROLE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {PLAZA_ROLE_LABELS[option]}
+                        </option>
+                      ))}
                     </select>
                   ) : null}
                 </div>

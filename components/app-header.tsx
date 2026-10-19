@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 
+import { roleLabel } from "@/lib/labels";
+
 type AppRole = "ADMIN" | "MANAGEMENT" | "MANAGER";
 
 export function AppHeader({ role }: { role: AppRole }) {
@@ -21,12 +23,6 @@ export function AppHeader({ role }: { role: AppRole }) {
         { label: "My tasks", href: "/my-tasks" },
         { label: "Administration", href: "/admin" },
       ];
-  const roleLabel = role === "MANAGER"
-    ? "Project / Plaza Manager"
-    : role === "ADMIN"
-      ? "Administrator"
-      : "Management";
-
   function isActive(href: string) {
     if (href === home) return pathname === href || pathname === "/";
     if (href === "/projects") return pathname.startsWith("/projects") || pathname.startsWith("/plazas");
@@ -56,7 +52,7 @@ export function AppHeader({ role }: { role: AppRole }) {
           })}
         </nav>
         <div className="cockpit-user-tools">
-          <span className="cockpit-role">{roleLabel}</span>
+          <span className="cockpit-role">{roleLabel(role)}</span>
           <button type="button" onClick={() => void signOut({ callbackUrl: "/login" })}>
             Sign out
           </button>

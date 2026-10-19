@@ -30,7 +30,7 @@ export default async function AdminUsersPage() {
       <PageHeader
         overline="Administration"
         title="Users"
-        subtitle="Create, change role, reset password, or deactivate. Users are never deleted."
+        subtitle="Create, change account type, reset password, or deactivate. Users are never deleted."
       />
       <UsersManager />
     </main>

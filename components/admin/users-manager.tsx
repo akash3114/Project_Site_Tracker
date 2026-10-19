@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { ROLE_LABELS, ROLE_OPTIONS } from "@/lib/labels";
+
 type UserItem = {
   id: string;
   name: string;
@@ -181,15 +183,17 @@ export function UsersManager() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
-            Role
+            Account type
             <select
               className={inputCls}
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}
             >
-              <option value="MANAGER">MANAGER</option>
-              <option value="MANAGEMENT">MANAGEMENT</option>
-              <option value="ADMIN">ADMIN</option>
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {ROLE_LABELS[option]}
+                </option>
+              ))}
             </select>
           </label>
           <div className="flex gap-2 md:col-span-2">
@@ -224,7 +228,7 @@ export function UsersManager() {
               <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
                 <th className={thCls}>Name</th>
                 <th className={thCls}>Email</th>
-                <th className={thCls}>Role</th>
+                <th className={thCls}>Account type</th>
                 <th className={thCls}>Active</th>
                 <th className={thCls}>Plazas</th>
                 <th className={thCls}>Actions</th>
@@ -240,7 +244,7 @@ export function UsersManager() {
                   <td className={`${tdCls} font-mono text-xs`}>{u.email}</td>
                   <td className={tdCls}>
                     <select
-                      aria-label={`Role for ${u.email}`}
+                      aria-label={`Account type for ${u.email}`}
                       className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-2 text-sm"
                       value={u.role}
                       disabled={saving}
@@ -248,9 +252,11 @@ export function UsersManager() {
                         void patch(u.id, { role: e.target.value })
                       }
                     >
-                      <option value="MANAGER">MANAGER</option>
-                      <option value="MANAGEMENT">MANAGEMENT</option>
-                      <option value="ADMIN">ADMIN</option>
+                      {ROLE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {ROLE_LABELS[option]}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td className={tdCls}>{u.active ? "Yes" : "No"}</td>
