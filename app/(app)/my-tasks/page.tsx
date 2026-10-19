@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { PageHeader } from "@/components/page-header";
 import { TaskTable, type PlazaTaskItem } from "@/components/task-table";
 import { TaskDrawer } from "@/components/task-drawer";
 import type { AssigneeOption } from "@/components/task-filters";
@@ -76,14 +77,11 @@ function MyTasksInner() {
   return (
     <>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
-          <div>
-            <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#102D27]">
-              My Tasks
-            </h1>
-            <p className="font-body text-sm text-[#586760]">
-              {total} assigned to me · overdue first
-            </p>
-          </div>
+          <PageHeader
+            overline="Assigned to you"
+            title="My tasks"
+            subtitle={`${total} assigned to me · overdue first`}
+          />
           {loading ? (
             <p className="text-sm text-[#586760]">Loading…</p>
           ) : error ? (

@@ -291,17 +291,26 @@
   gap: 12px;
 }
 .cockpit-live {
-  color: var(--c-muted);
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid #d3ded1;
+  background: #eef4ea;
+  color: #3d5348;
   font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .cockpit-live i {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 6px;
   border-radius: 50%;
-  background: #578449;
+  background: #4c7a41;
+  box-shadow: 0 0 0 3px #4c7a4122;
 }
 .cockpit-primary-button,
 .cockpit-secondary-button {

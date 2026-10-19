@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { ProjectCard } from "@/components/project-card";
 import type { ProjectSummary } from "@/lib/dashboard";
 
@@ -47,16 +48,15 @@ export default function ProjectsPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
-          <div>
-            <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#102D27]">
-              Projects
-            </h1>
-            <p className="font-body text-sm text-[#586760]">
-              {projects === null && !error
+          <PageHeader
+            overline="All projects"
+            title="Projects"
+            subtitle={
+              projects === null && !error
                 ? "Loading…"
-                : `${projects?.length ?? 0} projects · select one for plaza health`}
-            </p>
-          </div>
+                : `${projects?.length ?? 0} projects · select one for plaza health`
+            }
+          />
           {projects === null && !error ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {[0, 1, 2].map((i) => (

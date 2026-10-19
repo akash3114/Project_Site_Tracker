@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
+
 type AuditEvent = {
   id: string;
   type: string;
@@ -39,15 +41,11 @@ export default function AuditPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
-      <div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-[#102D27]">
-          Audit trail
-        </h1>
-        <p className="font-body text-sm text-[#586760]">
-          Latest 100 task events. Append-only — tasks and events can never be edited or deleted
-          here.
-        </p>
-      </div>
+      <PageHeader
+        overline="Administration"
+        title="Audit trail"
+        subtitle="Latest 100 task events. Append-only — tasks and events can never be edited or deleted here."
+      />
       {error ? (
         <p role="alert" className="rounded-md border border-[#F3C2C2] bg-[#FEF2F2] p-4 text-sm text-[#8F2824]">
           {error}

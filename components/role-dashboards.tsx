@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { TaskDrawer } from "@/components/task-drawer";
 import { NewTaskDialog } from "@/components/new-task-dialog";
+import { PageHeader } from "@/components/page-header";
 import type { AssigneeOption } from "@/components/task-filters";
 import type { PlazaTaskItem } from "@/components/task-table";
 import type { ProjectSummary } from "@/lib/dashboard";
@@ -479,17 +480,17 @@ function ManagementDashboard() {
 
   return (
     <PageFrame>
-      <div className="cockpit-title-row">
-        <div className="cockpit-title-copy">
-          <p className="cockpit-overline">All projects · {roundScopeLabel(snapshot?.rounds)}</p>
-          <h1>Delivery overview</h1>
-          <p className="cockpit-subtitle">Live status across every project and plaza, with exceptions surfaced first.</p>
-        </div>
-        <div className="cockpit-title-actions">
-          <span className="cockpit-live"><i aria-hidden="true" />Live data{updatedAt ? ` · updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</span>
-          {!loading && !error ? <TaskCreateAction plazas={plazas} tasks={attention} onCreated={() => void load()} /> : null}
-        </div>
-      </div>
+      <PageHeader
+        overline={`All projects · ${roundScopeLabel(snapshot?.rounds)}`}
+        title="Delivery overview"
+        subtitle="Live status across every project and plaza, with exceptions surfaced first."
+        action={
+          <>
+            <span className="cockpit-live"><i aria-hidden="true" />Live · updated {updatedAt ? updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+            {!loading && !error ? <TaskCreateAction plazas={plazas} tasks={attention} onCreated={() => void load()} /> : null}
+          </>
+        }
+      />
 
       {loading ? <div className="cockpit-loading" aria-label="Loading portfolio" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
         <>
@@ -578,14 +579,12 @@ function ManagerWorkbench() {
 
   return (
     <PageFrame>
-      <div className="cockpit-title-row">
-        <div className="cockpit-title-copy">
-          <p className="cockpit-overline">Assigned scope · Projects and plazas</p>
-          <h1>Your workbench</h1>
-          <p className="cockpit-subtitle">Tasks and site health across everything assigned to you.</p>
-        </div>
-        {!loading && !error ? <TaskCreateAction plazas={plazas} tasks={tasks} onCreated={() => void load()} /> : null}
-      </div>
+      <PageHeader
+        overline="Assigned scope · Projects and plazas"
+        title="Your workbench"
+        subtitle="Tasks and site health across everything assigned to you."
+        action={!loading && !error ? <TaskCreateAction plazas={plazas} tasks={tasks} onCreated={() => void load()} /> : null}
+      />
 
       {loading ? <div className="cockpit-loading" aria-label="Loading assigned work" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
         <>

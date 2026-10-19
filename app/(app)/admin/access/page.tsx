@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AccessManager } from "@/components/admin/access-manager";
+import { PageHeader } from "@/components/page-header";
 import { auth } from "@/lib/auth";
 
 function Forbidden() {
@@ -26,14 +27,11 @@ export default async function AdminAccessPage() {
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-[-0.02em] text-[#1C2824]">
-          Admin — Access matrix
-        </h1>
-        <p className="text-sm text-[#586760]">
-          Pick a user, tick plazas, save. Replaces mappings in one transaction.
-        </p>
-      </div>
+      <PageHeader
+        overline="Administration"
+        title="Access matrix"
+        subtitle="Pick a user, tick plazas, save. Replaces mappings in one transaction."
+      />
       <AccessManager />
     </main>
   );
