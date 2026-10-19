@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { TaskDrawer } from "@/components/task-drawer";
+import { TaskComposer } from "@/components/task-composer";
 import { PageHeader } from "@/components/page-header";
-import type { AssigneeOption } from "@/components/task-filters";
 import type { PlazaTaskItem } from "@/components/task-table";
 import type { ProjectSummary } from "@/lib/dashboard";
 import { fmtDate, isOverdue } from "@/lib/format";
@@ -332,165 +332,6 @@ function AttentionPanel({ tasks, overdue, blocked }: { tasks: DashboardTask[]; o
       })}
       {tasks.length === 0 ? <p className="cockpit-empty">No overdue or blocked tasks.</p> : null}
     </aside>
-  );
-}
-
-/**
- * Inline task composer. Replaces the old button → plaza picker → dialog trio:
- * every field the API accepts sits on one bar and posts straight to
- * POST /api/tasks. Owners belong to a plaza, so they load on demand and are
- * cached per plaza for the session.
- */
-function TaskComposer({
-  plazas,
-  tasks,
-  onCreated,
-}: {
-  plazas: PlazaSummary[];
-  tasks: DashboardTask[];
-  onCreated: () => void;
-}) {
-  const [plazaId, setPlazaId] = useState("");
-  const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
-  const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [alert, setAlert] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
-  const assigneeCache = useRef(new Map<string, AssigneeOption[]>());
-
-  // A single-plaza scope preselects itself so the bar posts in one move.
-  useEffect(() => {
-    if (plazas.length === 1 && plazaId !== plazas[0].id) setPlazaId(plazas[0].id);
-  }, [plazas, plazaId]);
-
-  useEffect(() => {
-    if (!plazaId) {
-      setAssignees([]);
-      return;
-    }
-    const cached = assigneeCache.current.get(plazaId);
-    if (cached) {
-      setAssignees(cached);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const seen = new Map<string, string>();
-      for (const task of tasks) {
-        if (task.plaza?.id === plazaId && task.assignee?.id) seen.set(task.assignee.id, task.assignee.name);
-      }
-      try {
-        const users = await apiJson<{ id: string; name: string; active?: boolean; plazaIds?: string[] }[]>("/api/users");
-        for (const user of users) {
-          if (user.active !== false && user.plazaIds?.includes(plazaId)) seen.set(user.id, user.name);
-        }
-      } catch {
-        // Manager accounts cannot browse the user directory; use visible task owners.
-      }
-      const list = Array.from(seen, ([id, name]) => ({ id, name }));
-      assigneeCache.current.set(plazaId, list);
-      if (!cancelled) setAssignees(list);
-    })();
-    return () => { cancelled = true; };
-  }, [plazaId, tasks]);
-
-  // The success line is a receipt, not a log — retire it on its own.
-  useEffect(() => {
-    if (alert?.tone !== "ok") return;
-    const timer = window.setTimeout(() => setAlert(null), 4000);
-    return () => window.clearTimeout(timer);
-  }, [alert]);
-
-  const ready = plazaId !== "" && title.trim().length >= 3 && !saving;
-  const submitHint = !plazaId
-    ? "Choose a plaza first"
-    : title.trim().length < 3
-      ? "A task title needs at least 3 characters"
-      : "Create task";
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!ready) return;
-    const cleanTitle = title.trim();
-    setSaving(true);
-    setAlert(null);
-    const body: Record<string, unknown> = { plazaId, title: cleanTitle };
-    if (priority) body.priority = priority;
-    if (dueDate) body.dueDate = dueDate;
-    if (assigneeId) body.assigneeId = assigneeId;
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setAlert({ tone: "error", text: (data as { error?: string } | null)?.error ?? `Create failed (${res.status})` });
-        return;
-      }
-      setTitle("");
-      setPriority("");
-      setDueDate("");
-      setAssigneeId("");
-      setAlert({ tone: "ok", text: `Added “${cleanTitle}”.` });
-      onCreated();
-    } catch {
-      setAlert({ tone: "error", text: "Network error creating task" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form className="cockpit-composer-form" onSubmit={submit} aria-label="New task">
-      <div className="cockpit-composer">
-        <select
-          className="cockpit-composer-plaza"
-          aria-label="Plaza"
-          value={plazaId}
-          disabled={plazas.length === 0}
-          onChange={(event) => { setPlazaId(event.target.value); setAssigneeId(""); }}
-        >
-          <option value="">Toll plaza</option>
-          {plazas.map((plaza) => <option key={plaza.id} value={plaza.id}>{plaza.name}{plaza.project?.name ? ` — ${plaza.project.name}` : ""}</option>)}
-        </select>
-        <input
-          className="cockpit-composer-title"
-          aria-label="Task title"
-          placeholder="Task title"
-          maxLength={200}
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-        />
-        <select className="cockpit-composer-priority" aria-label="Priority" value={priority} onChange={(event) => setPriority(event.target.value)}>
-          <option value="">Priority</option>
-          {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((p) => <option key={p} value={p}>{p[0] + p.slice(1).toLowerCase()}</option>)}
-        </select>
-        <input
-          className="cockpit-composer-date"
-          type="date"
-          aria-label="Due date"
-          value={dueDate}
-          onChange={(event) => setDueDate(event.target.value)}
-        />
-        <select
-          className="cockpit-composer-assignee"
-          aria-label="Assignee"
-          value={assigneeId}
-          disabled={!plazaId}
-          onChange={(event) => setAssigneeId(event.target.value)}
-        >
-          <option value="">Assignee</option>
-          {assignees.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        <button type="submit" className="cockpit-composer-submit" disabled={!ready} aria-label="Create task" title={submitHint}>+</button>
-      </div>
-      {alert ? <p className="cockpit-composer-alert" data-tone={alert.tone} role={alert.tone === "error" ? "alert" : "status"}>{alert.text}</p> : null}
-    </form>
   );
 }
 

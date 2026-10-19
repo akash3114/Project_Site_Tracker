@@ -325,9 +325,9 @@
   background: #fff;
 }
 .cockpit-composer select,
-.cockpit-composer input {
+.cockpit-composer input,
+.cockpit-composer textarea {
   min-width: 0;
-  height: 44px;
   padding: 0 9px;
   border: 1px solid #cdd6ce;
   border-radius: 0;
@@ -335,8 +335,13 @@
   color: var(--c-ink);
   font-size: 12px;
 }
+.cockpit-composer select,
+.cockpit-composer input {
+  height: 44px;
+}
 .cockpit-composer select:focus-visible,
-.cockpit-composer input:focus-visible {
+.cockpit-composer input:focus-visible,
+.cockpit-composer textarea:focus-visible {
   outline: 2px solid var(--c-forest);
   outline-offset: -1px;
 }
@@ -354,6 +359,38 @@
 }
 .cockpit-composer-assignee {
   flex: 0 1 178px;
+}
+.cockpit-composer-toggle {
+  height: 44px;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cockpit-composer-toggle:hover {
+  color: var(--c-deep);
+}
+.cockpit-composer-description {
+  height: auto;
+  min-height: 70px;
+  flex: 1 0 100%;
+  padding: 9px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.cockpit-composer-form[data-variant="page"] .cockpit-composer,
+.cockpit-composer-form[data-variant="page"] select,
+.cockpit-composer-form[data-variant="page"] input,
+.cockpit-composer-form[data-variant="page"] textarea,
+.cockpit-composer-form[data-variant="page"] .cockpit-composer-submit {
+  border-radius: 6px;
 }
 .cockpit-composer-submit {
   display: inline-flex;

@@ -12,7 +12,7 @@ import {
   type AssigneeOption,
   type TaskFilters,
 } from "@/components/task-filters";
-import { NewTaskDialog } from "@/components/new-task-dialog";
+import { TaskComposer } from "@/components/task-composer";
 import { TaskDrawer } from "@/components/task-drawer";
 
 const BOARD_COLUMNS = ["TODO", "IN_PROGRESS", "BLOCKED", "COMPLETED"] as const;
@@ -72,7 +72,6 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [filters, setFilters] = useState<TaskFilters>({});
   const [view, setView] = useState<"table" | "board">("table");
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "err"; msg: string } | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -325,13 +324,6 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                       </button>
                     ))}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setDialogOpen(true)}
-                    className="min-h-[44px] rounded-[6px] bg-[#173B33] px-5 font-body text-sm font-semibold text-white pst-transition hover:brightness-110"
-                  >
-                    + New Task
-                  </button>
                 </div>
               </div>
 
@@ -344,6 +336,13 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                   </p>
                 </div>
               ) : null}
+
+              <TaskComposer
+                fixedPlazaId={plazaId}
+                assignees={assignees}
+                variant="page"
+                onCreated={() => void loadTasks()}
+              />
 
               {loadingTasks ? (
                 <p className="font-body text-sm text-[#586760]">
@@ -423,17 +422,6 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
           )}
       </main>
 
-      <NewTaskDialog
-        plazaId={plazaId}
-        assignees={assignees}
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        onCreated={() => {
-          notify("ok", "Task created");
-          void loadTasks();
-        }}
-        onError={(msg) => notify("err", msg)}
-      />
       <TaskDrawer
         taskId={drawerTaskId}
         assignees={assignees}
