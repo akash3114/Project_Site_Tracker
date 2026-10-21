@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { projectSchema } from "@/lib/validations";
 
 export type ProjectFormValue = {
+  companyId: string;
   name: string;
   acronym?: string;
   round: "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4";
-  status?: "ACTIVE" | "ON_HOLD" | "COMPLETED";
+  active?: boolean;
 };
 
+type CompanyOption = { id: string; name: string; code: string };
+
 type Props = {
-  initial?: ProjectFormValue;
+  initial?: Partial<ProjectFormValue>;
   submitLabel: string;
   submitting?: boolean;
   serverError?: string | null;
@@ -32,24 +35,40 @@ export function ProjectForm({
   onSubmit,
   onCancel,
 }: Props) {
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [companyId, setCompanyId] = useState(initial?.companyId ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [acronym, setAcronym] = useState(initial?.acronym ?? "");
   const [round, setRound] = useState<ProjectFormValue["round"]>(
     initial?.round ?? "ROUND_1",
   );
-  const [status, setStatus] = useState<ProjectFormValue["status"]>(
-    initial?.status ?? "ACTIVE",
-  );
+  const [active, setActive] = useState(initial?.active ?? true);
   const [fieldError, setFieldError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/companies", { credentials: "same-origin" })
+      .then(async (res) => (res.ok ? ((await res.json()) as CompanyOption[]) : []))
+      .then((rows) => {
+        if (cancelled) return;
+        setCompanies(rows);
+        setCompanyId((current) => current || rows[0]?.id || "");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const opt = (v: string) => (v.trim() ? v.trim() : undefined);
     const parsed = projectSchema.safeParse({
+      companyId,
       name: name.trim(),
       acronym: opt(acronym),
       round,
-      status,
+      active,
     });
     if (!parsed.success) {
       setFieldError(parsed.error.issues[0]?.message ?? "Invalid input");
@@ -57,10 +76,11 @@ export function ProjectForm({
     }
     setFieldError(null);
     await onSubmit({
+      companyId: parsed.data.companyId,
       name: parsed.data.name,
       acronym: parsed.data.acronym,
       round: parsed.data.round,
-      status: parsed.data.status,
+      active: parsed.data.active,
     });
   }
 
@@ -69,6 +89,24 @@ export function ProjectForm({
       onSubmit={handleSubmit}
       className="flex flex-col gap-3 rounded-[12px] border border-[#CDD6CE] bg-white p-4"
     >
+      <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
+        Company
+        <select
+          className={inputCls}
+          value={companyId}
+          onChange={(e) => setCompanyId(e.target.value)}
+          required
+        >
+          {companies.length === 0 ? (
+            <option value="">Loading companies…</option>
+          ) : null}
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>
+              {company.code} — {company.name}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
         Name
         <input
@@ -109,17 +147,14 @@ export function ProjectForm({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
-          Status
+          Archive
           <select
             className={inputCls}
-            value={status}
-            onChange={(e) =>
-              setStatus(e.target.value as ProjectFormValue["status"])
-            }
+            value={active ? "ACTIVE" : "ARCHIVED"}
+            onChange={(e) => setActive(e.target.value === "ACTIVE")}
           >
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="ON_HOLD">ON_HOLD</option>
-            <option value="COMPLETED">COMPLETED</option>
+            <option value="ACTIVE">Active</option>
+            <option value="ARCHIVED">Archived</option>
           </select>
         </label>
       </div>
@@ -136,7 +171,7 @@ export function ProjectForm({
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || companies.length === 0}
           className="min-h-[44px] rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
         >
           {submitting ? "Saving…" : submitLabel}

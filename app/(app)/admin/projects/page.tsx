@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { ProjectsManager } from "@/components/admin/projects-manager";
 import { PageHeader } from "@/components/page-header";
-import { auth } from "@/lib/auth";
+import { getSessionUser } from "@/lib/access";
 
 function Forbidden() {
   return (
@@ -17,13 +17,11 @@ function Forbidden() {
   );
 }
 
-/** ADMIN + MANAGEMENT projects console. */
+/** Admin + Head Office projects console. */
 export default async function AdminProjectsPage() {
-  const session = await auth();
-  const role = (session?.user as unknown as { role?: string } | undefined)
-    ?.role;
-  if (!session?.user) redirect("/login");
-  if (role !== "ADMIN" && role !== "MANAGEMENT") return <Forbidden />;
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  if (!user.isAdmin && user.role !== "HEAD_OFFICE") return <Forbidden />;
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">

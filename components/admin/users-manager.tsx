@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { ROLE_LABELS, ROLE_OPTIONS } from "@/lib/labels";
+import { roleLabel } from "@/lib/labels";
 
 type UserItem = {
   id: string;
   name: string;
   email: string;
   phone: string | null;
-  role: "ADMIN" | "MANAGEMENT" | "MANAGER";
+  role: "ADMIN" | "HEAD_OFFICE" | "PROJECT_MANAGER";
+  isAdmin: boolean;
   active: boolean;
   plazaIds: string[];
 };
@@ -41,7 +42,7 @@ export function UsersManager() {
     name: "",
     email: "",
     password: "",
-    role: "MANAGER",
+    isAdmin: false,
   });
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState("");
@@ -98,7 +99,7 @@ export function UsersManager() {
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error(await readError(res));
-      setForm({ name: "", email: "", password: "", role: "MANAGER" });
+      setForm({ name: "", email: "", password: "", isAdmin: false });
       setShowCreate(false);
       setNotice("User created");
       await load();
@@ -186,14 +187,13 @@ export function UsersManager() {
             Account type
             <select
               className={inputCls}
-              value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              value={form.isAdmin ? "ADMIN" : "FIELD"}
+              onChange={(e) =>
+                setForm({ ...form, isAdmin: e.target.value === "ADMIN" })
+              }
             >
-              {ROLE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {ROLE_LABELS[option]}
-                </option>
-              ))}
+              <option value="FIELD">Field user (assignments define access)</option>
+              <option value="ADMIN">Admin</option>
             </select>
           </label>
           <div className="flex gap-2 md:col-span-2">
@@ -246,17 +246,16 @@ export function UsersManager() {
                     <select
                       aria-label={`Account type for ${u.email}`}
                       className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-2 text-sm"
-                      value={u.role}
+                      value={u.isAdmin ? "ADMIN" : "FIELD"}
                       disabled={saving}
                       onChange={(e) =>
-                        void patch(u.id, { role: e.target.value })
+                        void patch(u.id, {
+                          isAdmin: e.target.value === "ADMIN",
+                        })
                       }
                     >
-                      {ROLE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {ROLE_LABELS[option]}
-                        </option>
-                      ))}
+                      <option value="FIELD">{roleLabel(u.role)}</option>
+                      <option value="ADMIN">Admin</option>
                     </select>
                   </td>
                   <td className={tdCls}>{u.active ? "Yes" : "No"}</td>

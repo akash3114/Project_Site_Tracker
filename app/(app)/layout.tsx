@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AppHeader } from "@/components/app-header";
 import { getSessionUser } from "@/lib/access";
+import { badgeTitle } from "@/lib/badge";
 
 export default async function AppLayout({
   children,
@@ -9,9 +10,11 @@ export default async function AppLayout({
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
+  const title = await badgeTitle(user);
+
   return (
     <div className="cockpit">
-      <AppHeader role={user.role} />
+      <AppHeader role={user.role} title={title} />
       <div className="cockpit-route-content">{children}</div>
     </div>
   );

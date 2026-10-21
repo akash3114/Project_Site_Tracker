@@ -1,58 +1,78 @@
-import type { Role } from "@prisma/client";
+import { NextResponse } from "next/server";
 
-import { auth } from "@/lib/auth";
-import { requirePlazaAccess } from "@/lib/access";
+import { getSessionUser, requireTaskAccess } from "@/lib/access";
 import { db } from "@/lib/db";
 import { commentSchema } from "@/lib/validations";
 
-type SessionUser = { id: string; role: Role };
-
-async function sessionUser(): Promise<SessionUser | null> {
-  const session = await auth();
-  const u = session?.user as unknown as
-    | { id?: string; role?: Role }
-    | undefined;
-  if (!u?.id || !u?.role) return null;
-  return { id: u.id, role: u.role };
-}
-
+/** POST /api/tasks/:id/comments → append a comment (allowed when completed). */
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
 ): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body: unknown = await req.json().catch(() => null);
     const parsed = commentSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(
+      return NextResponse.json(
         { error: "Invalid input", issues: parsed.error.flatten() },
         { status: 400 },
       );
     }
 
-    const task = await db.task.findUnique({ where: { id: params.id } });
-    if (!task) return Response.json({ error: "Not found" }, { status: 404 });
+    await requireTaskAccess(user, params.id);
 
-    await requirePlazaAccess(user, task.plazaId);
+    const attachmentIds = parsed.data.attachmentIds ?? [];
+    if (attachmentIds.length > 0) {
+      const attachments = await db.taskAttachment.findMany({
+        where: { id: { in: attachmentIds }, taskId: params.id },
+        select: { id: true, activityId: true },
+      });
+      if (
+        attachments.length !== attachmentIds.length ||
+        attachments.some((a) => a.activityId !== null)
+      ) {
+        return NextResponse.json(
+          { error: "One or more attachments are invalid for this task" },
+          { status: 422 },
+        );
+      }
+    }
 
     const event = await db.$transaction(async (tx) => {
-      return tx.taskEvent.create({
+      const comment = await tx.taskActivity.create({
         data: {
-          taskId: task.id,
+          taskId: params.id,
           actorId: user.id,
           type: "COMMENT",
-          fromStatus: task.status,
-          toStatus: task.status,
           text: parsed.data.text,
         },
-        include: { actor: { select: { id: true, name: true } } },
+      });
+      if (attachmentIds.length > 0) {
+        await tx.taskAttachment.updateMany({
+          where: { id: { in: attachmentIds }, taskId: params.id },
+          data: { activityId: comment.id },
+        });
+      }
+      return tx.taskActivity.findUnique({
+        where: { id: comment.id },
+        include: {
+          actor: { select: { id: true, name: true } },
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              mimeType: true,
+              sizeBytes: true,
+            },
+          },
+        },
       });
     });
 
-    return Response.json(event, { status: 201 });
+    return NextResponse.json(event, { status: 201 });
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

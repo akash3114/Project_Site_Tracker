@@ -7,19 +7,34 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+const emptyToUndefined = (v: unknown) => (v === "" ? undefined : v);
+
+const emptyToNull = (v: unknown) => (v === "" || v === undefined ? null : v);
+
+export const companySchema = z.object({
+  name: z.string().min(2).max(150),
+  code: z.string().min(1).max(20).optional(),
+  active: z.boolean().optional(),
+});
+
+export const updateCompanySchema = companySchema.partial();
+
 export const projectSchema = z.object({
+  companyId: z.string().cuid(),
   name: z.string().min(3).max(150),
-  acronym: z.string().max(20).optional(),
+  acronym: z.preprocess(emptyToUndefined, z.string().max(20).optional()),
   round: z.enum(["ROUND_1", "ROUND_2", "ROUND_3", "ROUND_4"]),
-  status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED"]).optional(),
+  state: z.preprocess(emptyToUndefined, z.string().max(100).optional()),
+  lengthKm: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().positive().max(100000).optional(),
+  ),
+  piu: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
+  ro: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
+  active: z.boolean().optional(),
 });
 
 export const updateProjectSchema = projectSchema.partial();
-
-const emptyToUndefinedNumber = (v: unknown) =>
-  v === "" || v === null || v === undefined ? undefined : v;
-
-const emptyToUndefined = (v: unknown) => (v === "" ? undefined : v);
 
 export const plazaSchema = z.object({
   projectId: z.string().cuid(),
@@ -28,10 +43,10 @@ export const plazaSchema = z.object({
   piu: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
   ro: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
   lengthKm: z.preprocess(
-    emptyToUndefinedNumber,
+    emptyToUndefined,
     z.coerce.number().positive().max(100000).optional(),
   ),
-  status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED"]).optional(),
+  active: z.boolean().optional(),
 });
 
 export const updatePlazaSchema = plazaSchema
@@ -43,15 +58,20 @@ export const userSchema = z.object({
   email: z.string().email(),
   phone: z.string().max(30).optional(),
   password: z.string().min(6),
-  role: z.enum(["ADMIN", "MANAGEMENT", "MANAGER"]),
+  isAdmin: z.boolean().default(false),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   phone: z.string().max(30).nullable().optional(),
-  role: z.enum(["ADMIN", "MANAGEMENT", "MANAGER"]).optional(),
+  isAdmin: z.boolean().optional(),
   active: z.boolean().optional(),
   password: z.string().min(6).optional(),
+});
+
+export const companyAssignmentSchema = z.object({
+  companyId: z.string().cuid(),
+  userId: z.string().cuid(),
 });
 
 export const projectAssignmentSchema = z.object({
@@ -68,10 +88,12 @@ export const plazaAssignmentSchema = z.object({
 });
 
 export const createTaskSchema = z.object({
-  plazaId: z.string().cuid(),
+  projectId: z.string().cuid().optional(),
+  plazaId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+  categoryId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
   title: z.string().min(3).max(200),
   description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).default("MEDIUM"),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
   assigneeId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
   dueDate: z.preprocess(
     emptyToUndefined,
@@ -88,7 +110,8 @@ export const updateTaskSchema = z.object({
     emptyToUndefined,
     z.string().max(5000).nullable().optional(),
   ),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+  categoryId: z.preprocess(emptyToNull, z.string().cuid().nullable().optional()),
   dueDate: z.preprocess(
     emptyToUndefined,
     z
@@ -105,16 +128,39 @@ export const statusSchema = z.object({
 });
 
 export const assignSchema = z.object({
-  assigneeId: z.string().cuid(),
+  assigneeId: z.string().cuid().nullable(),
 });
 
-export const commentSchema = z.object({
-  text: z.string().min(1).max(2000),
+export const commentSchema = z
+  .object({
+    text: z.string().max(2000).default(""),
+    attachmentIds: z.array(z.string().cuid()).max(10).optional(),
+  })
+  .refine(
+    (value) =>
+      value.text.trim().length > 0 || (value.attachmentIds?.length ?? 0) > 0,
+    {
+      message: "A comment needs text or at least one attachment",
+      path: ["text"],
+    },
+  );
+
+export const reopenRequestSchema = z.object({
+  reason: z.string().min(10).max(2000),
 });
 
-export const reopenSchema = z.object({
-  text: z.string().max(2000).optional(),
+export const reopenDecisionSchema = z.object({
+  requestId: z.string().cuid(),
+  decision: z.enum(["APPROVE", "REJECT"]),
+  note: z.string().max(2000).optional(),
 });
+
+export const categorySchema = z.object({
+  name: z.string().min(2).max(80),
+  active: z.boolean().optional(),
+});
+
+export const updateCategorySchema = categorySchema.partial();
 
 export const plazaAssignmentInputSchema = z.object({
   plazaId: z.string().cuid(),
@@ -126,3 +172,11 @@ export const accessPutSchema = z.object({
   userId: z.string().cuid(),
   assignments: z.array(plazaAssignmentInputSchema).max(500),
 });
+
+export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+export const ATTACHMENT_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+] as const;

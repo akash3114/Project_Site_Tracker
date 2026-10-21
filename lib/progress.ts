@@ -1,4 +1,4 @@
-import type { TaskStatus } from "@prisma/client";
+import type { Prisma, TaskStatus } from "@prisma/client";
 
 /** Task progress derived from status (locked mapping). */
 export const STATUS_PROGRESS: Record<TaskStatus, number> = {
@@ -23,7 +23,7 @@ export function plazaProgress(completed: number, total: number): number {
 
 export function isOverdue(
   dueDate: Date | string | null | undefined,
-  status: TaskStatus,
+  status: TaskStatus | string,
   today: Date = new Date(),
 ): boolean {
   if (!dueDate || status === "COMPLETED") return false;
@@ -33,3 +33,5 @@ export function isOverdue(
   t.setHours(0, 0, 0, 0);
   return due.getTime() < t.getTime();
 }
+
+export type TaskScopeWhere = Prisma.TaskWhereInput;

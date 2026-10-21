@@ -10,6 +10,7 @@ import { TaskTable, type PlazaTaskItem } from "@/components/task-table";
 import {
   TaskFiltersBar,
   type AssigneeOption,
+  type CategoryOption,
   type TaskFilters,
 } from "@/components/task-filters";
 import { TaskComposer } from "@/components/task-composer";
@@ -17,18 +18,23 @@ import { TaskDrawer } from "@/components/task-drawer";
 
 const BOARD_COLUMNS = ["TODO", "IN_PROGRESS", "BLOCKED", "COMPLETED"] as const;
 
+type PlazaStatus = "ACTIVE" | "ARCHIVED";
+
 type PlazaDetail = {
   id: string;
   name: string;
-  chainage?: string | null;
-  highway?: string | null;
-  location?: string | null;
   lengthKm?: number | null;
   state?: string | null;
   piu?: string | null;
   ro?: string | null;
-  status?: string;
-  project?: { id: string; name: string } | null;
+  active?: boolean;
+  status?: PlazaStatus;
+  project?: {
+    id: string;
+    name: string;
+    acronym?: string | null;
+    company?: { id: string; name: string; code?: string | null } | null;
+  } | null;
   projectId?: string;
   task?: { total: number; completed: number; blocked: number; overdue: number };
   progressPct?: number;
@@ -37,6 +43,7 @@ type PlazaDetail = {
 function plazaMeta(plaza: PlazaDetail): string {
   const parts: string[] = [];
   if (plaza.project?.name) parts.push(plaza.project.name);
+  if (plaza.project?.company?.name) parts.push(plaza.project.company.name);
   if (plaza.state) parts.push(plaza.state);
   if (typeof plaza.lengthKm === "number") parts.push(`${plaza.lengthKm} km`);
   if (plaza.piu) parts.push(`PIU ${plaza.piu}`);
@@ -71,6 +78,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
   const [total, setTotal] = useState(0);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [filters, setFilters] = useState<TaskFilters>({});
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [view, setView] = useState<"table" | "board">("table");
   const [notice, setNotice] = useState<{ tone: "ok" | "err"; msg: string } | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -115,12 +123,33 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
     };
   }, [plazaId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/categories", {
+          credentials: "same-origin",
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const list = (Array.isArray(data) ? data : []) as CategoryOption[];
+        setCategories(list.filter((category) => category.active !== false));
+      } catch {
+        // The category filter and composer field simply stay hidden.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const loadTasks = useCallback(async () => {
     setLoadingTasks(true);
     try {
       const params = new URLSearchParams({ plazaId, pageSize: "50" });
       if (filters.status?.[0]) params.set("status", filters.status[0]);
       if (filters.priority?.[0]) params.set("priority", filters.priority[0]);
+      if (filters.categoryId) params.set("categoryId", filters.categoryId);
       if (filters.assigneeId) params.set("assigneeId", filters.assigneeId);
       if (filters.overdueOnly) params.set("overdue", "true");
       if (q) params.set("q", q);
@@ -140,33 +169,34 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
     } finally {
       setLoadingTasks(false);
     }
-  }, [plazaId, filters.status, filters.priority, filters.assigneeId, filters.overdueOnly, q, notify]);
+  }, [plazaId, filters.status, filters.priority, filters.categoryId, filters.assigneeId, filters.overdueOnly, q, notify]);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
 
-  // Assignee options: prefer the user directory (admin/lead), otherwise
-  // derive from assignees already visible on this plaza's tasks —
-  // GET /api/users and GET /api/access?plazaId= both 403 for site users.
-  const [directory, setDirectory] = useState<AssigneeOption[] | null>(null);
+  // Assignee options come from GET /api/assignees, already filtered by the
+  // assignment ceiling. The task-derived list is the offline/failure fallback;
+  // GET /api/users is admin-only and would 403 for site users.
+  const [resolvedAssignees, setResolvedAssignees] =
+    useState<AssigneeOption[] | null>(null);
   useEffect(() => {
+    const projectId = plaza?.project?.id;
+    if (!projectId) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/users", { credentials: "same-origin" });
+        const params = new URLSearchParams({ projectId, plazaId });
+        const res = await fetch(`/api/assignees?${params.toString()}`, {
+          credentials: "same-origin",
+        });
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        const list = (Array.isArray(data) ? data : data.items ?? []) as {
+        const list = (Array.isArray(data) ? data : []) as {
           id: string;
           name: string;
-          plazaIds?: string[];
         }[];
-        setDirectory(
-          list
-            .filter((u) => !u.plazaIds || u.plazaIds.includes(plazaId))
-            .map((u) => ({ id: u.id, name: u.name })),
-        );
+        setResolvedAssignees(list.map(({ id, name }) => ({ id, name })));
       } catch {
         // Fall through to the task-derived fallback below.
       }
@@ -174,16 +204,32 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [plazaId]);
+  }, [plaza?.project?.id, plazaId]);
 
   const assignees: AssigneeOption[] = useMemo(() => {
-    if (directory) return directory;
+    if (resolvedAssignees) return resolvedAssignees;
     const seen = new Map<string, string>();
     for (const t of tasks) {
       if (t.assignee?.id && t.assignee?.name) seen.set(t.assignee.id, t.assignee.name);
     }
     return Array.from(seen, ([id, name]) => ({ id, name }));
-  }, [directory, tasks]);
+  }, [resolvedAssignees, tasks]);
+
+  const composerPlazas = useMemo(
+    () =>
+      plaza
+        ? [
+            {
+              id: plaza.id,
+              name: plaza.name,
+              project: plaza.project
+                ? { id: plaza.project.id, name: plaza.project.name }
+                : null,
+            },
+          ]
+        : [],
+    [plaza],
+  );
 
   function openTask(id: string) {
     router.push(`${pathname}?task=${id}`);
@@ -226,6 +272,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
   }, [tasks]);
 
   const denied = plazaState === "denied";
+  const archived = plaza?.status === "ARCHIVED" || plaza?.active === false;
 
   return (
     <>
@@ -235,6 +282,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               filters={filters}
               onChange={setFilters}
               assignees={assignees}
+              categories={categories}
             />
           </div>
       </div>
@@ -302,6 +350,17 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                     {plaza ? plazaMeta(plaza) || "Loading plaza…" : "Loading plaza…"}
                   </p>
                 </div>
+                {plaza ? (
+                  <span
+                    className={`inline-flex min-h-[28px] items-center rounded-[6px] border px-2 font-mono text-xs font-medium uppercase tracking-wide ${
+                      archived
+                        ? "border-[#CDD6CE] bg-[#F5F5EF] text-[#586760]"
+                        : "border-green-600/30 bg-[#E8F0DD] text-[#385A2B]"
+                    }`}
+                  >
+                    {archived ? "Archived" : "Active"}
+                  </span>
+                ) : null}
                 <div className="ml-auto flex items-center gap-2">
                   <div
                     role="group"
@@ -338,8 +397,10 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
               ) : null}
 
               <TaskComposer
+                plazas={composerPlazas}
                 fixedPlazaId={plazaId}
                 assignees={assignees}
+                categories={categories}
                 variant="page"
                 onCreated={() => void loadTasks()}
               />

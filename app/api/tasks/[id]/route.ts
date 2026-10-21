@@ -1,108 +1,123 @@
-import type { Role } from "@prisma/client";
+import { NextResponse } from "next/server";
 
-import { auth } from "@/lib/auth";
-import { requirePlazaAccess } from "@/lib/access";
+import {
+  assigneeCandidates,
+  canEditTaskCore,
+  getSessionUser,
+  requireTaskAccess,
+} from "@/lib/access";
 import { db } from "@/lib/db";
+import { taskDetailInclude, taskPermissions } from "@/lib/task-data";
 import { updateTaskSchema } from "@/lib/validations";
 
-type SessionUser = { id: string; role: Role };
-
-async function sessionUser(): Promise<SessionUser | null> {
-  const session = await auth();
-  const u = session?.user as unknown as
-    | { id?: string; role?: Role }
-    | undefined;
-  if (!u?.id || !u?.role) return null;
-  return { id: u.id, role: u.role };
-}
-
-const detailInclude = {
-  plaza: {
-    select: {
-      id: true,
-      name: true,
-      lengthKm: true,
-      state: true,
-      piu: true,
-      ro: true,
-      project: { select: { id: true, name: true, acronym: true, round: true } },
-    },
-  },
-  assignee: { select: { id: true, name: true } },
-  createdBy: { select: { id: true, name: true } },
-  events: {
-    orderBy: { createdAt: "asc" },
-    include: { actor: { select: { id: true, name: true } } },
-  },
-} as const;
-
+/** GET /api/tasks/:id → full detail, activity feed, permissions, assignees. */
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } },
 ): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const access = await requireTaskAccess(user, params.id);
     const task = await db.task.findUnique({
       where: { id: params.id },
-      include: detailInclude,
+      include: taskDetailInclude,
     });
-    if (!task) return Response.json({ error: "Not found" }, { status: 404 });
+    if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    await requirePlazaAccess(user, task.plazaId);
+    const permissions = taskPermissions(user, access.task, access.role);
+    const [assignees, pendingReopen] = await Promise.all([
+      permissions.canAssign && (access.role === "ADMIN" || access.role === "HEAD_OFFICE" || access.role === "PROJECT_MANAGER" || access.role === "SITE_MANAGER")
+        ? assigneeCandidates(access.role, task.projectId, task.plazaId)
+        : Promise.resolve([]),
+      db.taskReopenRequest.findFirst({
+        where: { taskId: task.id, status: "PENDING" },
+        include: {
+          requestedBy: { select: { id: true, name: true } },
+          reviewedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
-    const { plaza, assignee, createdBy, events } = task;
-    return Response.json({ task, plaza, assignee, createdBy, events });
+    return NextResponse.json({
+      task,
+      events: task.activities,
+      permissions,
+      assignees,
+      reopenRequest: pendingReopen,
+    });
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;
   }
 }
 
+/** PATCH /api/tasks/:id → core field edits. */
 export async function PATCH(
   req: Request,
   { params }: { params: { id: string } },
 ): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body: unknown = await req.json().catch(() => null);
     const parsed = updateTaskSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(
+      return NextResponse.json(
         { error: "Invalid input", issues: parsed.error.flatten() },
         { status: 400 },
       );
     }
 
-    const task = await db.task.findUnique({ where: { id: params.id } });
-    if (!task) return Response.json({ error: "Not found" }, { status: 404 });
-
-    await requirePlazaAccess(user, task.plazaId);
-
-    if (task.status === "COMPLETED") {
-      return Response.json(
+    const access = await requireTaskAccess(user, params.id);
+    if (access.task.status === "COMPLETED") {
+      return NextResponse.json(
         { error: "Task is completed. Reopen it before editing." },
         { status: 423 },
       );
     }
+    if (!canEditTaskCore(user, access.task, access.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-    const { title, description, priority, dueDate } = parsed.data;
+    const { title, description, priority, categoryId, dueDate } = parsed.data;
     const changed: string[] = [];
     if (title !== undefined) changed.push("title");
     if (description !== undefined) changed.push("description");
     if (priority !== undefined) changed.push("priority");
-    if (dueDate !== undefined) changed.push("dueDate");
+    if (categoryId !== undefined) changed.push("category");
+    if (dueDate !== undefined) changed.push("due date");
+
+    if (changed.length === 0) {
+      return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+    }
+
+    if (categoryId) {
+      const category = await db.taskCategory.findUnique({
+        where: { id: categoryId },
+        select: { active: true },
+      });
+      if (!category?.active) {
+        return NextResponse.json(
+          { error: "Category not found or inactive" },
+          { status: 422 },
+        );
+      }
+    }
 
     const updated = await db.$transaction(async (tx) => {
       const next = await tx.task.update({
-        where: { id: task.id },
+        where: { id: params.id },
         data: {
           ...(title !== undefined ? { title } : {}),
-          ...(description !== undefined ? { description } : {}),
+          ...(description !== undefined
+            ? { description: description ?? null }
+            : {}),
           ...(priority !== undefined ? { priority } : {}),
+          ...(categoryId !== undefined ? { categoryId } : {}),
           ...(dueDate !== undefined
             ? {
                 dueDate:
@@ -112,25 +127,22 @@ export async function PATCH(
               }
             : {}),
         },
-        include: {
-          plaza: { select: { id: true, name: true } },
-          assignee: { select: { id: true, name: true } },
-        },
+        include: taskDetailInclude,
       });
-      await tx.taskEvent.create({
+      await tx.taskActivity.create({
         data: {
-          taskId: task.id,
+          taskId: params.id,
           actorId: user.id,
-          type: "META",
-          fromStatus: task.status,
-          toStatus: task.status,
-          text: changed.length > 0 ? `Updated ${changed.join(", ")}` : null,
+          type: "UPDATED",
+          fromStatus: access.task.status,
+          toStatus: access.task.status,
+          text: `Updated ${changed.join(", ")}`,
         },
       });
       return next;
     });
 
-    return Response.json(updated, { status: 200 });
+    return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

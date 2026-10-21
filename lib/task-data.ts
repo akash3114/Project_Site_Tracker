@@ -1,0 +1,122 @@
+import type { Task, TaskActivityType, TaskStatus } from "@prisma/client";
+
+import {
+  canApproveReopen,
+  canChangeTaskStatus,
+  canEditTaskCore,
+  canReopenDirectly,
+  canRequestReopen,
+  type ScopeRole,
+  type SessionUser,
+} from "@/lib/access";
+
+export const taskInclude = {
+  project: {
+    select: {
+      id: true,
+      name: true,
+      acronym: true,
+      round: true,
+      company: { select: { id: true, name: true, code: true } },
+    },
+  },
+  plaza: {
+    select: {
+      id: true,
+      name: true,
+      state: true,
+      lengthKm: true,
+      piu: true,
+      ro: true,
+    },
+  },
+  category: { select: { id: true, name: true } },
+  assignee: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true } },
+  completedBy: { select: { id: true, name: true } },
+} as const;
+
+export const taskDetailInclude = {
+  ...taskInclude,
+  activities: {
+    orderBy: { createdAt: "asc" as const },
+    include: {
+      actor: { select: { id: true, name: true } },
+      fromAssignee: { select: { id: true, name: true } },
+      toAssignee: { select: { id: true, name: true } },
+      attachments: {
+        select: {
+          id: true,
+          fileName: true,
+          mimeType: true,
+          sizeBytes: true,
+        },
+      },
+    },
+  },
+  attachments: {
+    orderBy: { createdAt: "asc" as const },
+    include: { uploadedBy: { select: { id: true, name: true } } },
+  },
+  reopenRequests: {
+    orderBy: { createdAt: "desc" as const },
+    include: {
+      requestedBy: { select: { id: true, name: true } },
+      reviewedBy: { select: { id: true, name: true } },
+    },
+  },
+} as const;
+
+export type TaskPermissions = {
+  canEdit: boolean;
+  canChangeStatus: boolean;
+  canAssign: boolean;
+  canReopenDirect: boolean;
+  canRequestReopen: boolean;
+  canApproveReopen: boolean;
+  canComment: boolean;
+  canUpload: boolean;
+  canDelete: boolean;
+};
+
+export function taskPermissions(
+  user: SessionUser,
+  task: Pick<
+    Task,
+    "status" | "projectId" | "plazaId" | "assigneeId" | "createdById"
+  >,
+  role: ScopeRole,
+): TaskPermissions {
+  return {
+    canEdit: canEditTaskCore(user, task, role),
+    canChangeStatus: canChangeTaskStatus(task, role),
+    canAssign: task.status !== "COMPLETED",
+    canReopenDirect: task.status === "COMPLETED" && canReopenDirectly(role),
+    canRequestReopen: canRequestReopen(task, role),
+    canApproveReopen: canApproveReopen(role),
+    canComment: true,
+    canUpload: true,
+    canDelete: role === "ADMIN",
+  };
+}
+
+export const ACTIVITY_LABELS: Record<TaskActivityType, string> = {
+  CREATED: "Created",
+  COMMENT: "Comment",
+  ASSIGNED: "Assignment changed",
+  STATUS_CHANGED: "Status changed",
+  REOPEN_REQUESTED: "Reopen requested",
+  REOPEN_APPROVED: "Reopen approved",
+  REOPEN_REJECTED: "Reopen rejected",
+  REOPEN_CANCELLED: "Reopen request cancelled",
+  REOPENED: "Reopened",
+  ATTACHMENT: "Attachment",
+  UPDATED: "Details updated",
+};
+
+export const STATUS_LABELS: Record<TaskStatus, string> = {
+  TODO: "To do",
+  IN_PROGRESS: "In progress",
+  BLOCKED: "Blocked",
+  COMPLETED: "Completed",
+};

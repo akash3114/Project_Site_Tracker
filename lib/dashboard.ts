@@ -1,13 +1,10 @@
 /**
- * Dashboard data contracts mirroring the real API shapes (docs/DATABASE.md):
+ * Dashboard data contracts mirroring the API shapes.
  * - GET /api/projects → ProjectSummary[]
  * - GET /api/tasks (paginated) → { items: SpotlightTask[], total, page, pageSize }
- *
- * Types only — real data comes from the API routes backed by Prisma. The old
- * seed-shaped fallbacks were removed once the v2 dashboards went live.
  */
 
-export type ProjectStatus = "ACTIVE" | "ON_HOLD" | "COMPLETED";
+export type ProjectStatus = "ACTIVE" | "ARCHIVED";
 export type SpotlightStatus = "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
 
 export interface ProjectSummary {
@@ -16,6 +13,8 @@ export interface ProjectSummary {
   acronym?: string | null;
   state?: string | null;
   round?: string | null;
+  company?: { id: string; name: string } | null;
+  active: boolean;
   status: ProjectStatus;
   plazaCount: number;
   task: { total: number; completed: number; blocked: number; overdue: number };
@@ -24,10 +23,12 @@ export interface ProjectSummary {
 
 export interface SpotlightTask {
   id: string;
+  projectId: string;
   title: string;
   status: SpotlightStatus;
-  priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  priority: "LOW" | "MEDIUM" | "HIGH";
   dueDate: string | null;
+  project?: { id: string; name: string; acronym?: string | null };
   plaza: {
     id: string;
     name: string;
@@ -35,6 +36,7 @@ export interface SpotlightTask {
     lengthKm?: number | null;
     state?: string | null;
     projectName: string;
-  };
+  } | null;
+  category?: { id: string; name: string } | null;
   assignee: { name: string } | null;
 }

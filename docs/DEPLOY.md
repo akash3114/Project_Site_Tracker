@@ -14,15 +14,15 @@
 - `docker/compose.dev.yml` — local dev: `db` only
 - `docker/Caddyfile` — `{$CADDY_DOMAIN:localhost} { reverse_proxy app:3000 }`
 - `.env` — NEVER commit (git-ignored + docker-ignored); prod values live only on the VM. Keys in `.env.example` (`POSTGRES_*, DATABASE_URL, AUTH_SECRET, NEXTAUTH_URL, CADDY_DOMAIN, SEED_ADMIN_*`)
-- `scripts/reset-prod.sh` — guarded one-time v2 baseline reset (see below)
+- `scripts/reset-prod.sh` — guarded one-time baseline reset (see below)
 - Prisma pinned to **v6** (`prisma@6` + `@prisma/client@6`). Do NOT `npm install prisma@latest` (v8 RC breaks the `validate`/`migrate dev` workflow).
 
-## One-time v2 baseline reset (existing pilot DB)
+## One-time company-hierarchy baseline reset (existing pilot DB)
 
-The v1 schema (pre-assignment roles, no `acronym`/`round`, different columns and
-enums) is incompatible with the v2 baseline migration `20261016072820_init_v2`.
-If the VM already ran v1, drop and rebuild the schema once. **It snapshots first,
-but back up regardless.**
+Any earlier pilot schema (pre-Company, different role/enum layout) is
+incompatible with the current baseline migration `20261021000000_init`. If the
+VM already ran an earlier build, drop and rebuild the schema once. **It
+snapshots first, but back up regardless.**
 
 ```bash
 cd /opt/tracker
@@ -31,8 +31,8 @@ curl -k https://tracker.internal/api/health   # -> {"ok":true,...}
 ```
 
 The script refuses to run without `CONFIRM=DROP`, dumps to `/backups`, stops
-`app`, drops and recreates the `public` schema (which also clears the stale v1
-`_prisma_migrations` ledger), applies the v2 baseline through the `migrate`
+`app`, drops and recreates the `public` schema (which also clears the stale
+`_prisma_migrations` ledger), applies the current baseline through the `migrate`
 service, and seeds when `SEED=1`. A brand-new VM skips this section — go straight
 to First deploy.
 
@@ -63,7 +63,7 @@ curl -k https://tracker.internal/api/health
 - Migrations and seed run in the `migrate` service (`tools` image), **not** in `app`: the runner is a lean standalone bundle with no Prisma CLI and no `tsx`.
 - Fonts use `next/font/google` at build time — the VM needs internet at `docker build`, or switch to self-hosted fonts.
 - Seed (`npm run seed`) is idempotent via upserts; run only pre-pilot. Never with real data (`SEED_RESET` wipes every table — one-time baseline reset only).
-- **Credentials:** the seed creates ~90 managers on a shared `Tracker@123`. Rotate after distribution:
+- **Credentials:** the seed creates 92 field logins on a shared `Tracker@123` plus Admin/Head Office accounts. Rotate after distribution:
   - bulk: `docker compose -f docker/compose.yml run --rm migrate npm run rotate-managers -- '<new-password>'`
   - single user: Admin → Users → Reset password
   - admin: `docker compose -f docker/compose.yml run --rm migrate npm run reset-admin -- admin@tracker.local '<new-password>'`

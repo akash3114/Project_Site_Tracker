@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-import type { AssigneeOption } from "@/components/task-filters";
+import type { AssigneeOption, CategoryOption } from "@/components/task-filters";
 
-const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+const PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
 
 type PlazaOption = {
   id: string;
@@ -12,10 +12,25 @@ type PlazaOption = {
   project?: { id: string; name: string } | null;
 };
 
+type ProjectOption = {
+  id: string;
+  name: string;
+  plazas: PlazaOption[];
+};
+
+type Scope =
+  | { kind: "plaza"; plazaId: string; projectId: string | null }
+  | { kind: "project"; projectId: string };
+
 type OwnerSource = {
   plaza?: { id: string } | null;
+  projectId?: string | null;
+  project?: { id: string } | null;
   assignee?: { id: string; name: string } | null;
 };
+
+const EMPTY_TASKS: OwnerSource[] = [];
+const EMPTY_CATEGORIES: CategoryOption[] = [];
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
@@ -30,21 +45,59 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+function parseScope(
+  value: string,
+  projects: ProjectOption[],
+  plazas: PlazaOption[],
+): Scope | null {
+  const separator = value.indexOf(":");
+  if (separator === -1) return null;
+  const kind = value.slice(0, separator);
+  const id = value.slice(separator + 1);
+  if (kind === "project") {
+    return projects.some((project) => project.id === id)
+      ? { kind: "project", projectId: id }
+      : null;
+  }
+  if (kind === "plaza") {
+    const plaza = plazas.find((entry) => entry.id === id);
+    if (!plaza) return null;
+    return { kind: "plaza", plazaId: plaza.id, projectId: plaza.project?.id ?? null };
+  }
+  return null;
+}
+
+/** Assignees already visible on tasks in the selected scope. */
+function deriveAssignees(scope: Scope, tasks: OwnerSource[]): AssigneeOption[] {
+  const seen = new Map<string, string>();
+  for (const task of tasks) {
+    if (!task.assignee?.id || !task.assignee.name) continue;
+    const matches =
+      scope.kind === "plaza"
+        ? task.plaza?.id === scope.plazaId
+        : (task.projectId ?? task.project?.id) === scope.projectId;
+    if (matches) seen.set(task.assignee.id, task.assignee.name);
+  }
+  return Array.from(seen, ([id, name]) => ({ id, name }));
+}
+
 /**
  * Inline task composer, shared by the role dashboards and the plaza page.
  *
- * Creating one task used to mean a button, a plaza picker and a modal. The bar
- * collapses that into a single row that posts straight to POST /api/tasks.
- * Owners belong to a plaza, so options load on demand and are cached per plaza
- * for the session; the plaza page already resolves them and passes them in.
- * Manager accounts cannot list the user directory (403), so the fallback is
- * the owners already visible on that plaza's tasks.
+ * A task belongs to a project and optionally to one of its plazas. The scope
+ * picker therefore lists projects first: each project offers "Project-level"
+ * plus its plazas. On the plaza page the scope is fixed and hidden.
+ *
+ * Assignees come from GET /api/assignees (already filtered by the assignment
+ * ceiling); manager accounts cannot list the user directory, so the fallback
+ * is the assignees already visible on tasks in that scope.
  */
 export function TaskComposer({
   plazas,
   fixedPlazaId,
-  tasks = [],
+  tasks,
   assignees: resolvedAssignees,
+  categories: resolvedCategories,
   onCreated,
   variant = "cockpit",
 }: {
@@ -52,75 +105,164 @@ export function TaskComposer({
   plazas?: PlazaOption[];
   /** Set on the plaza page: the plaza is known, so its field is hidden. */
   fixedPlazaId?: string;
-  /** Used to derive owner options when the directory is out of reach. */
+  /** Used to derive owner options when the assignee lookup is out of reach. */
   tasks?: OwnerSource[];
-  /** Pre-resolved owner options; skips the per-plaza lookup when supplied. */
+  /** Pre-resolved owner options; used when the assignee lookup fails. */
   assignees?: AssigneeOption[];
+  /** Pre-resolved active categories; skips the lookup when supplied. */
+  categories?: CategoryOption[];
   onCreated: () => void;
   variant?: "cockpit" | "page";
 }) {
   const plazaOptions = useMemo(() => plazas ?? [], [plazas]);
-  const [plazaId, setPlazaId] = useState(fixedPlazaId ?? "");
+  const taskSource = tasks ?? EMPTY_TASKS;
+
+  const projects = useMemo(() => {
+    const byId = new Map<string, ProjectOption>();
+    for (const plaza of plazaOptions) {
+      if (!plaza.project?.id) continue;
+      const project =
+        byId.get(plaza.project.id) ??
+        ({ id: plaza.project.id, name: plaza.project.name, plazas: [] } as ProjectOption);
+      project.plazas.push(plaza);
+      byId.set(project.id, project);
+    }
+    return Array.from(byId.values());
+  }, [plazaOptions]);
+
+  const orphanPlazas = useMemo(
+    () => plazaOptions.filter((plaza) => !plaza.project?.id),
+    [plazaOptions],
+  );
+
+  const [scopeValue, setScopeValue] = useState(() =>
+    fixedPlazaId ? `plaza:${fixedPlazaId}` : "",
+  );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [priority, setPriority] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
-  const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
+  const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
+  const [fetchedCategories, setFetchedCategories] =
+    useState<CategoryOption[]>(EMPTY_CATEGORIES);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
   const ownerCache = useRef(new Map<string, AssigneeOption[]>());
 
+  const scope = useMemo<Scope | null>(() => {
+    const parsed = parseScope(scopeValue, projects, plazaOptions);
+    if (parsed) return parsed;
+    // Backward-compatible fallback: a fixed plaza can render before the plaza
+    // list resolves; POST by plazaId alone is valid.
+    if (fixedPlazaId) {
+      const plaza = plazaOptions.find((entry) => entry.id === fixedPlazaId);
+      return {
+        kind: "plaza",
+        plazaId: fixedPlazaId,
+        projectId: plaza?.project?.id ?? null,
+      };
+    }
+    return null;
+  }, [scopeValue, projects, plazaOptions, fixedPlazaId]);
+
+  const scopeKind = scope?.kind ?? null;
+  const scopePlazaId = scope?.kind === "plaza" ? scope.plazaId : null;
+  const scopeProjectId = scope?.projectId ?? null;
+
   // A single-plaza scope preselects itself so the bar posts in one move.
   useEffect(() => {
-    if (plazaOptions.length === 1 && plazaId !== plazaOptions[0].id) {
-      setPlazaId(plazaOptions[0].id);
-    }
-  }, [plazaOptions, plazaId]);
+    if (fixedPlazaId || scopeValue) return;
+    if (plazaOptions.length === 1) setScopeValue(`plaza:${plazaOptions[0].id}`);
+  }, [fixedPlazaId, plazaOptions, scopeValue]);
 
+  // Active categories for the optional category select.
   useEffect(() => {
-    if (!plazaId) {
-      setAssignees([]);
-      return;
-    }
-    if (resolvedAssignees) {
-      setAssignees(resolvedAssignees);
-      return;
-    }
-    const cached = ownerCache.current.get(plazaId);
-    if (cached) {
-      setAssignees(cached);
-      return;
-    }
+    if (resolvedCategories) return;
     let cancelled = false;
     void (async () => {
-      const seen = new Map<string, string>();
-      for (const task of tasks) {
-        if (task.plaza?.id === plazaId && task.assignee?.id) {
-          seen.set(task.assignee.id, task.assignee.name);
-        }
-      }
       try {
-        const users = await fetchJson<
-          { id: string; name: string; active?: boolean; plazaIds?: string[] }[]
-        >("/api/users");
-        for (const user of users) {
-          if (user.active !== false && user.plazaIds?.includes(plazaId)) {
-            seen.set(user.id, user.name);
-          }
+        const data = await fetchJson<CategoryOption[]>("/api/categories");
+        if (!cancelled) {
+          setFetchedCategories(Array.isArray(data) ? data : EMPTY_CATEGORIES);
         }
       } catch {
-        // Manager accounts cannot browse the user directory; keep what we have.
+        // Non-admins still see active categories; on failure hide the field.
       }
-      const list = Array.from(seen, ([id, name]) => ({ id, name }));
-      ownerCache.current.set(plazaId, list);
-      if (!cancelled) setAssignees(list);
     })();
     return () => {
       cancelled = true;
     };
-  }, [plazaId, tasks, resolvedAssignees]);
+  }, [resolvedCategories]);
+
+  const categoryOptions = useMemo(
+    () =>
+      (resolvedCategories ?? fetchedCategories).filter(
+        (category) => category.active !== false,
+      ),
+    [resolvedCategories, fetchedCategories],
+  );
+
+  useEffect(() => {
+    if (!scopeKind) {
+      setAssigneeOptions([]);
+      return;
+    }
+    const current: Scope =
+      scopeKind === "plaza"
+        ? { kind: "plaza", plazaId: scopePlazaId ?? "", projectId: scopeProjectId }
+        : { kind: "project", projectId: scopeProjectId ?? "" };
+    const cacheKey =
+      current.kind === "plaza"
+        ? `plaza:${current.plazaId}:${current.projectId ?? ""}`
+        : `project:${current.projectId}`;
+    const cached = ownerCache.current.get(cacheKey);
+    if (cached) {
+      setAssigneeOptions(cached);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      let list: AssigneeOption[] | null = null;
+      if (current.projectId) {
+        try {
+          const params = new URLSearchParams({ projectId: current.projectId });
+          if (current.kind === "plaza") params.set("plazaId", current.plazaId);
+          const data = await fetchJson<{ id: string; name: string }[]>(
+            `/api/assignees?${params.toString()}`,
+          );
+          list = (Array.isArray(data) ? data : []).map(({ id, name }) => ({
+            id,
+            name,
+          }));
+        } catch {
+          list = null;
+        }
+      }
+      if (list === null) {
+        list =
+          fixedPlazaId && resolvedAssignees && resolvedAssignees.length > 0
+            ? resolvedAssignees
+            : deriveAssignees(current, taskSource);
+      }
+      ownerCache.current.set(cacheKey, list);
+      if (!cancelled) setAssigneeOptions(list);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    scopeKind,
+    scopePlazaId,
+    scopeProjectId,
+    fixedPlazaId,
+    resolvedAssignees,
+    taskSource,
+  ]);
 
   // The success line is a receipt, not a log — retire it on its own.
   useEffect(() => {
@@ -129,23 +271,26 @@ export function TaskComposer({
     return () => window.clearTimeout(timer);
   }, [alert]);
 
-  const ready = plazaId !== "" && title.trim().length >= 3 && !saving;
-  const submitHint = !plazaId
-    ? "Choose a plaza first"
+  const ready = scope !== null && title.trim().length >= 3 && !saving;
+  const submitHint = !scope
+    ? "Choose a project or plaza first"
     : title.trim().length < 3
       ? "A task title needs at least 3 characters"
       : "Create task";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ready) return;
+    if (!ready || !scope) return;
     const cleanTitle = title.trim();
     const cleanDescription = description.trim();
     setSaving(true);
     setAlert(null);
-    const body: Record<string, unknown> = { plazaId, title: cleanTitle };
+    const body: Record<string, unknown> = { title: cleanTitle };
+    if (scope.kind === "plaza") body.plazaId = scope.plazaId;
+    else body.projectId = scope.projectId;
     if (cleanDescription) body.description = cleanDescription;
-    if (priority) body.priority = priority;
+    body.priority = priority || "MEDIUM";
+    if (categoryId) body.categoryId = categoryId;
     if (dueDate) body.dueDate = dueDate;
     if (assigneeId) body.assigneeId = assigneeId;
     try {
@@ -168,6 +313,7 @@ export function TaskComposer({
       setTitle("");
       setDescription("");
       setPriority("");
+      setCategoryId("");
       setDueDate("");
       setAssigneeId("");
       setAlert({ tone: "ok", text: `Added “${cleanTitle}”.` });
@@ -190,21 +336,34 @@ export function TaskComposer({
         {fixedPlazaId ? null : (
           <select
             className="cockpit-composer-plaza"
-            aria-label="Plaza"
-            value={plazaId}
+            aria-label="Project or plaza"
+            value={scopeValue}
             disabled={plazaOptions.length === 0}
             onChange={(event) => {
-              setPlazaId(event.target.value);
+              setScopeValue(event.target.value);
               setAssigneeId("");
             }}
           >
-            <option value="">Toll plaza</option>
-            {plazaOptions.map((plaza) => (
-              <option key={plaza.id} value={plaza.id}>
-                {plaza.name}
-                {plaza.project?.name ? ` — ${plaza.project.name}` : ""}
-              </option>
+            <option value="">Project or plaza</option>
+            {projects.map((project) => (
+              <optgroup key={project.id} label={project.name}>
+                <option value={`project:${project.id}`}>Project-level</option>
+                {project.plazas.map((plaza) => (
+                  <option key={plaza.id} value={`plaza:${plaza.id}`}>
+                    {plaza.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
+            {orphanPlazas.length > 0 ? (
+              <optgroup label="Plazas">
+                {orphanPlazas.map((plaza) => (
+                  <option key={plaza.id} value={`plaza:${plaza.id}`}>
+                    {plaza.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
         )}
         <input
@@ -228,6 +387,21 @@ export function TaskComposer({
             </option>
           ))}
         </select>
+        {categoryOptions.length > 0 ? (
+          <select
+            className="flex-[1_1_150px] md:flex-[0_1_150px]"
+            aria-label="Category"
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+          >
+            <option value="">Category</option>
+            {categoryOptions.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <input
           className="cockpit-composer-date"
           type="date"
@@ -239,11 +413,11 @@ export function TaskComposer({
           className="cockpit-composer-assignee"
           aria-label="Assignee"
           value={assigneeId}
-          disabled={!plazaId}
+          disabled={!scope}
           onChange={(event) => setAssigneeId(event.target.value)}
         >
           <option value="">Assignee</option>
-          {assignees.map((a) => (
+          {assigneeOptions.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}
             </option>

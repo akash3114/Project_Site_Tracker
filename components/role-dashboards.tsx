@@ -14,12 +14,22 @@ type Status = "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
 type RoundKey = "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4";
 type StatusCounts = Record<Status, number>;
 
+type CompanySummary = {
+  id: string;
+  name: string;
+  code?: string | null;
+  projectCount: number;
+  taskCounts: StatusCounts;
+};
+
 type Snapshot = {
   projectCount: number;
   plazaCount: number;
+  companyCount: number;
   kpis: { open: number; overdue: number; blocked: number; completedWeek: number };
   statusCounts: StatusCounts;
   rounds: { round: RoundKey; projectCount: number; taskCounts: StatusCounts }[];
+  companies: CompanySummary[];
 };
 
 type PlazaSummary = {
@@ -36,11 +46,6 @@ type PlazaSummary = {
 type DashboardTask = PlazaTaskItem & {
   completedAt?: string | null;
   createdAt?: string | null;
-  plaza?: {
-    id: string;
-    name: string;
-    project?: { id: string; name: string };
-  };
 };
 
 type TaskResponse = { items: DashboardTask[]; total: number; page: number; pageSize: number };
@@ -311,8 +316,61 @@ function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
   );
 }
 
+function CompaniesPanel({ companies }: { companies: CompanySummary[] }) {
+  if (companies.length === 0) return null;
+  return (
+    <section className="cockpit-panel mb-3" aria-labelledby="companies-title">
+      <div className="cockpit-panel-head">
+        <div>
+          <h2 id="companies-title">Companies</h2>
+          <span>{companies.length} {companies.length === 1 ? "company" : "companies"} · projects and task load</span>
+        </div>
+      </div>
+      <div
+        className="cockpit-project-columns"
+        role="table"
+        aria-label="Companies with project and task counts"
+        aria-rowcount={companies.length + 1}
+        aria-colcount={4}
+      >
+        <div className="cockpit-project-head" role="row">
+          <span role="columnheader">Company</span>
+          <span role="columnheader">Projects</span>
+          <span role="columnheader">Open</span>
+          <span role="columnheader">Completed</span>
+        </div>
+        <div role="rowgroup">
+          {companies.map((company) => {
+            const total = Object.values(company.taskCounts).reduce((sum, value) => sum + value, 0);
+            const open = total - company.taskCounts.COMPLETED;
+            return (
+              <div
+                className="cockpit-project-row"
+                key={company.id}
+                role="row"
+                aria-label={`${company.name}: ${company.projectCount} projects, ${open} open tasks, ${company.taskCounts.COMPLETED} completed`}
+              >
+                <span className="project-title-cell" role="cell">
+                  <span className="project-acronym-tag">{company.code?.trim() || "—"}</span>
+                  <span className="project-title-wrap">
+                    <strong title={company.name}>{company.name}</strong>
+                    <small>{total} tasks · {company.taskCounts.BLOCKED} blocked</small>
+                  </span>
+                </span>
+                <span className="project-count" role="cell">{company.projectCount}</span>
+                <span className={`project-count ${open > 0 ? "" : "zero"}`} role="cell">{open}</span>
+                <span className="project-count" role="cell">{company.taskCounts.COMPLETED}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function formatTaskProject(task: DashboardTask) {
-  return task.plaza?.project?.name ?? "Project";
+  return task.project?.name ?? task.plaza?.project?.name ?? "Project";
 }
 
 function AttentionPanel({ tasks, overdue, blocked }: { tasks: DashboardTask[]; overdue: number; blocked: number }) {
@@ -325,7 +383,7 @@ function AttentionPanel({ tasks, overdue, blocked }: { tasks: DashboardTask[]; o
         return (
           <Link className="attention-row" key={task.id} href={task.plaza?.id ? `/plazas/${task.plaza.id}?task=${task.id}` : "/my-tasks"}>
             <i className={`attention-dot ${task.status === "BLOCKED" ? "blocked" : "late"}`} aria-hidden="true" />
-            <span className="attention-copy"><strong>{task.title}</strong><small>{task.plaza?.name ?? "Plaza"} · {formatTaskProject(task)}</small></span>
+            <span className="attention-copy"><strong>{task.title}</strong><small>{task.plaza?.name ?? "Project-level"} · {formatTaskProject(task)}</small></span>
             <span className={`attention-age ${task.status === "BLOCKED" ? "blocked" : "late"}`}>{task.status === "BLOCKED" ? "Blocked" : late ? `Due ${fmtDate(task.dueDate)}` : "Overdue"}</span>
           </Link>
         );
@@ -409,13 +467,15 @@ function ManagementDashboard() {
             </div>
           </section>
 
+          <CompaniesPanel companies={snapshot.companies ?? []} />
+
           <section className="cockpit-main-grid">
             <ProjectRegister projects={projects} />
             <AttentionPanel tasks={attention} overdue={snapshot.kpis.overdue} blocked={snapshot.kpis.blocked} />
           </section>
 
           <section className="cockpit-metrics" aria-label="Portfolio summary">
-            <Metric label="Projects" value={snapshot.projectCount} note="All rounds" />
+            <Metric label="Projects" value={snapshot.projectCount} note={`${snapshot.companyCount} companies`} />
             <Metric label="Plaza sites" value={snapshot.plazaCount} note="Portfolio total" />
             <Metric label="Open tasks" value={snapshot.kpis.open} note="Not completed" />
             <Metric label="Overdue" value={snapshot.kpis.overdue} note="Past due date" tone="risk" />
@@ -464,7 +524,7 @@ function ManagerWorkbench() {
     return tasks
       .filter((task) => task.status !== "COMPLETED")
       .filter((task) => filter === "overdue" ? isOverdue(task.dueDate, task.status) : filter === "blocked" ? task.status === "BLOCKED" : true)
-      .filter((task) => !q || `${task.title} ${task.plaza?.name ?? ""} ${task.plaza?.project?.name ?? ""} ${task.assignee?.name ?? ""}`.toLowerCase().includes(q))
+      .filter((task) => !q || `${task.title} ${task.plaza?.name ?? ""} ${task.project?.name ?? task.plaza?.project?.name ?? ""} ${task.project?.company?.name ?? ""} ${task.assignee?.name ?? ""}`.toLowerCase().includes(q))
       .sort((a, b) => {
         const lateDelta = Number(isOverdue(b.dueDate, b.status)) - Number(isOverdue(a.dueDate, a.status));
         if (lateDelta) return lateDelta;
@@ -521,7 +581,7 @@ function ManagerWorkbench() {
                     <div className="cockpit-task-row" key={task.id} role="row">
                       <span className="task-title-cell" role="cell">
                         <button type="button" onClick={() => setSelectedTask(task.id)}>{task.title}</button>
-                        <small>{task.plaza?.name ?? "Plaza"} · {task.plaza?.project?.name ?? "Project"}</small>
+                        <small>{task.plaza?.name ?? "Project-level"} · {formatTaskProject(task)}</small>
                       </span>
                       <span role="cell">{task.assignee?.name ?? "Unassigned"}</span>
                       <span role="cell"><StatusPill status={task.status} /></span>

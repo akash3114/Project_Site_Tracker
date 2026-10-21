@@ -1,72 +1,59 @@
-import type { Role } from "@prisma/client";
+import { NextResponse } from "next/server";
 
-import { auth } from "@/lib/auth";
-import { requirePlazaAccess } from "@/lib/access";
+import { getSessionUser, requireTaskAccess } from "@/lib/access";
 import { db } from "@/lib/db";
 import { canTransition } from "@/lib/transitions";
 import { statusSchema } from "@/lib/validations";
 
-type SessionUser = { id: string; role: Role };
-
-async function sessionUser(): Promise<SessionUser | null> {
-  const session = await auth();
-  const u = session?.user as unknown as
-    | { id?: string; role?: Role }
-    | undefined;
-  if (!u?.id || !u?.role) return null;
-  return { id: u.id, role: u.role };
-}
-
+/** POST /api/tasks/:id/status → move status; COMPLETED locks further moves. */
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
 ): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body: unknown = await req.json().catch(() => null);
     const parsed = statusSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(
+      return NextResponse.json(
         { error: "Invalid input", issues: parsed.error.flatten() },
         { status: 400 },
       );
     }
     const { to, text } = parsed.data;
 
-    const task = await db.task.findUnique({ where: { id: params.id } });
-    if (!task) return Response.json({ error: "Not found" }, { status: 404 });
-
-    await requirePlazaAccess(user, task.plazaId);
-
-    if (task.status === "COMPLETED") {
-      return Response.json(
-        { error: "Task is completed. Use /reopen to move it back." },
+    const access = await requireTaskAccess(user, params.id);
+    if (access.task.status === "COMPLETED") {
+      return NextResponse.json(
+        { error: "Task is completed. Request or approve a reopen first." },
         { status: 422 },
       );
     }
-    if (!canTransition(task.status, to)) {
-      return Response.json(
-        { error: `Illegal transition ${task.status} -> ${to}` },
+    if (!canTransition(access.task.status, to)) {
+      return NextResponse.json(
+        { error: `Illegal transition ${access.task.status} -> ${to}` },
         { status: 422 },
       );
     }
 
     const updated = await db.$transaction(async (tx) => {
       const next = await tx.task.update({
-        where: { id: task.id },
+        where: { id: params.id },
         data: {
           status: to,
-          ...(to === "COMPLETED" ? { completedAt: new Date() } : {}),
+          ...(to === "COMPLETED"
+            ? { completedAt: new Date(), completedById: user.id }
+            : { completedAt: null, completedById: null }),
         },
       });
-      await tx.taskEvent.create({
+      await tx.taskActivity.create({
         data: {
-          taskId: task.id,
+          taskId: params.id,
           actorId: user.id,
-          type: "STATUS",
-          fromStatus: task.status,
+          type: "STATUS_CHANGED",
+          fromStatus: access.task.status,
           toStatus: to,
           text: text ?? null,
         },
@@ -74,7 +61,7 @@ export async function POST(
       return next;
     });
 
-    return Response.json(updated, { status: 200 });
+    return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

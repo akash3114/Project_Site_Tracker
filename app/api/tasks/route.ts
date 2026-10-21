@@ -1,52 +1,33 @@
 import type { Prisma } from "@prisma/client";
-import type { Role } from "@prisma/client";
+import { NextResponse } from "next/server";
 
-import { auth } from "@/lib/auth";
 import {
-  accessiblePlazaIds,
-  assigneeHasPlazaAccess,
+  actorScopeRole,
+  canAssignTo,
+  canCreateTask,
+  getSessionUser,
   requirePlazaAccess,
+  requireProjectAccess,
+  taskScopeWhere,
 } from "@/lib/access";
 import { db } from "@/lib/db";
+import { taskInclude } from "@/lib/task-data";
 import { createTaskSchema } from "@/lib/validations";
 
-type SessionUser = { id: string; role: Role };
-
-async function sessionUser(): Promise<SessionUser | null> {
-  const session = await auth();
-  const u = session?.user as unknown as
-    | { id?: string; role?: Role }
-    | undefined;
-  if (!u?.id || !u?.role) return null;
-  return { id: u.id, role: u.role };
-}
-
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "BLOCKED", "COMPLETED"] as const;
-const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
-
-const taskInclude = {
-  plaza: {
-    select: {
-      id: true,
-      name: true,
-      lengthKm: true,
-      state: true,
-      project: { select: { id: true, name: true, acronym: true } },
-    },
-  },
-  assignee: { select: { id: true, name: true } },
-  createdBy: { select: { id: true, name: true } },
-} as const;
+const PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
 
 export async function GET(req: Request): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const url = new URL(req.url);
     const plazaId = url.searchParams.get("plazaId") ?? undefined;
+    const projectId = url.searchParams.get("projectId") ?? undefined;
     const status = url.searchParams.get("status") ?? undefined;
     const priority = url.searchParams.get("priority") ?? undefined;
+    const categoryId = url.searchParams.get("categoryId") ?? undefined;
     const assigneeParam = url.searchParams.get("assigneeId") ?? undefined;
     const overdue = url.searchParams.get("overdue") === "true";
     const q = url.searchParams.get("q") ?? undefined;
@@ -62,31 +43,26 @@ export async function GET(req: Request): Promise<Response> {
       ),
     );
 
-    const where: Prisma.TaskWhereInput = {};
+    const where: Prisma.TaskWhereInput = { ...(await taskScopeWhere(user)) };
 
     if (plazaId) {
       await requirePlazaAccess(user, plazaId);
       where.plazaId = plazaId;
-    } else {
-      const ids = await accessiblePlazaIds(user.id, user.role);
-      if (ids.length === 0) {
-        return Response.json({ items: [], total: 0, page, pageSize });
-      }
-      where.plazaId = { in: ids };
+    }
+    if (projectId) {
+      await requireProjectAccess(user, projectId);
+      where.projectId = projectId;
     }
 
-    if (
-      status &&
-      (TASK_STATUSES as readonly string[]).includes(status)
-    ) {
+    if (status && (TASK_STATUSES as readonly string[]).includes(status)) {
       where.status = status as (typeof TASK_STATUSES)[number];
     }
     if (priority && (PRIORITIES as readonly string[]).includes(priority)) {
       where.priority = priority as (typeof PRIORITIES)[number];
     }
+    if (categoryId) where.categoryId = categoryId;
     if (assigneeParam) {
-      where.assigneeId =
-        assigneeParam === "me" ? user.id : assigneeParam;
+      where.assigneeId = assigneeParam === "me" ? user.id : assigneeParam;
     }
     if (overdue) {
       const today = new Date();
@@ -103,13 +79,13 @@ export async function GET(req: Request): Promise<Response> {
       db.task.findMany({
         where,
         include: taskInclude,
-        orderBy: { updatedAt: "desc" },
+        orderBy: [{ updatedAt: "desc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
     ]);
 
-    return Response.json({ items, total, page, pageSize });
+    return NextResponse.json({ items, total, page, pageSize });
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;
@@ -118,33 +94,81 @@ export async function GET(req: Request): Promise<Response> {
 
 export async function POST(req: Request): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body: unknown = await req.json().catch(() => null);
     const parsed = createTaskSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(
+      return NextResponse.json(
         { error: "Invalid input", issues: parsed.error.flatten() },
         { status: 400 },
       );
     }
-    const { plazaId, title, description, priority, assigneeId, dueDate } =
+
+    const { title, description, priority, assigneeId, dueDate, categoryId } =
       parsed.data;
 
-    await requirePlazaAccess(user, plazaId);
+    let projectId = parsed.data.projectId ?? null;
+    const plazaId = parsed.data.plazaId ?? null;
 
-    if (assigneeId) {
+    if (plazaId) {
       const plaza = await db.plaza.findUnique({
         where: { id: plazaId },
-        select: { projectId: true },
+        select: { id: true, projectId: true },
       });
-      if (
-        !plaza ||
-        !(await assigneeHasPlazaAccess(assigneeId, plazaId, plaza.projectId))
-      ) {
-        return Response.json(
-          { error: "Assignee has no access to this plaza" },
+      if (!plaza) {
+        return NextResponse.json({ error: "Plaza not found" }, { status: 404 });
+      }
+      if (projectId && projectId !== plaza.projectId) {
+        return NextResponse.json(
+          { error: "Plaza does not belong to the selected project" },
+          { status: 422 },
+        );
+      }
+      projectId = plaza.projectId;
+    }
+    if (!projectId) {
+      return NextResponse.json(
+        { error: "projectId or plazaId is required" },
+        { status: 400 },
+      );
+    }
+
+    const project = await db.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    if (!(await canCreateTask(user, projectId, plazaId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const actorRole = await actorScopeRole(user, projectId, plazaId);
+    if (!actorRole) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (assigneeId) {
+      if (!(await canAssignTo(actorRole, projectId, plazaId, assigneeId))) {
+        return NextResponse.json(
+          { error: "That person cannot be assigned in this scope" },
+          { status: 422 },
+        );
+      }
+    }
+
+    if (categoryId) {
+      const category = await db.taskCategory.findUnique({
+        where: { id: categoryId },
+        select: { active: true },
+      });
+      if (!category?.active) {
+        return NextResponse.json(
+          { error: "Category not found or inactive" },
           { status: 422 },
         );
       }
@@ -153,39 +177,47 @@ export async function POST(req: Request): Promise<Response> {
     const task = await db.$transaction(async (tx) => {
       const created = await tx.task.create({
         data: {
+          projectId,
           plazaId,
+          categoryId: categoryId ?? null,
           title,
-          description,
+          description: description ?? null,
           priority,
-          assigneeId,
-          dueDate: dueDate ? new Date(`${dueDate}T00:00:00Z`) : undefined,
+          assigneeId: assigneeId ?? null,
+          dueDate: dueDate ? new Date(`${dueDate}T00:00:00Z`) : null,
           createdById: user.id,
         },
         include: taskInclude,
       });
-      await tx.taskEvent.create({
+
+      await tx.taskActivity.create({
         data: {
           taskId: created.id,
           actorId: user.id,
           type: "CREATED",
-          toStatus: created.status,
+          toStatus: "TODO",
+          toAssigneeId: assigneeId ?? null,
+          text: plazaId ? "Task created" : "Project-level task created",
         },
       });
+
       if (assigneeId) {
-        await tx.taskEvent.create({
+        await tx.taskActivity.create({
           data: {
             taskId: created.id,
             actorId: user.id,
-            type: "ASSIGN",
-            toStatus: created.status,
-            text: assigneeId,
+            type: "ASSIGNED",
+            fromStatus: "TODO",
+            toStatus: "TODO",
+            toAssigneeId: assigneeId,
           },
         });
       }
+
       return created;
     });
 
-    return Response.json(task, { status: 201 });
+    return NextResponse.json(task, { status: 201 });
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

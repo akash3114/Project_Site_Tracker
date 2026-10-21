@@ -36,15 +36,17 @@ export function SpotlightTable({ tasks }: { tasks: SpotlightTask[] }) {
                 <td className="p-4">
                   <span className="font-medium text-[#1C2824]">{task.title}</span>
                   <span className="mt-0.5 block font-mono text-xs text-[#66756D]">
-                    {task.plaza.projectName}
+                    {task.plaza?.projectName ?? task.project?.name ?? "Project-level"}
                     {task.assignee ? ` · ${task.assignee.name}` : ""}
                   </span>
                 </td>
-                <td className="p-4 text-[#1C2824]">{task.plaza.name}</td>
+                <td className="p-4 text-[#1C2824]">
+                  {task.plaza?.name ?? "—"}
+                </td>
                 <td className="p-4 font-mono text-xs text-[#586760]">
-                  {typeof task.plaza.lengthKm === "number"
+                  {typeof task.plaza?.lengthKm === "number"
                     ? `${task.plaza.lengthKm} km`
-                    : (task.plaza.chainage ?? "—")}
+                    : (task.plaza?.chainage ?? "—")}
                 </td>
                 <td
                   className={`p-4 font-mono text-xs ${overdue ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}

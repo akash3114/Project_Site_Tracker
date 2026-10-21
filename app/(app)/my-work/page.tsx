@@ -6,6 +6,6 @@ import { getSessionUser } from "@/lib/access";
 export default async function MyWorkPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
-  if (user.role !== "MANAGER") redirect("/management");
+  if (user.role !== "PROJECT_MANAGER") redirect("/management");
   return <RoleDashboard view="manager" />;
 }

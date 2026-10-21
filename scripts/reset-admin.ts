@@ -14,17 +14,19 @@ async function main(): Promise<void> {
 
   const user = await db.user.upsert({
     where: { email },
-    update: { passwordHash, active: true, role: "ADMIN" },
+    update: { passwordHash, active: true, isAdmin: true },
     create: {
       email,
       name: "Admin",
       passwordHash,
-      role: "ADMIN",
+      isAdmin: true,
       active: true,
     },
   });
 
-  console.log(`reset-admin: ${user.email} (id=${user.id}, role=${user.role})`);
+  console.log(
+    `reset-admin: ${user.email} (id=${user.id}, isAdmin=${user.isAdmin})`,
+  );
   console.log(`hash: ${passwordHash}`);
 }
 

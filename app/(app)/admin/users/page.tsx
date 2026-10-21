@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { UsersManager } from "@/components/admin/users-manager";
 import { PageHeader } from "@/components/page-header";
-import { auth } from "@/lib/auth";
+import { getSessionUser } from "@/lib/access";
 
 function Forbidden() {
   return (
@@ -19,11 +19,9 @@ function Forbidden() {
 
 /** ADMIN-gated users console (T-014). Deactivate only — never delete. */
 export default async function AdminUsersPage() {
-  const session = await auth();
-  const role = (session?.user as unknown as { role?: string } | undefined)
-    ?.role;
-  if (!session?.user) redirect("/login");
-  if (role !== "ADMIN") return <Forbidden />;
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  if (!user.isAdmin) return <Forbidden />;
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">

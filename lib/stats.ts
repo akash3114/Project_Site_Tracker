@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { db } from "./db";
 import { plazaProgress } from "./progress";
 
@@ -26,31 +28,32 @@ function startOfWeekIST(now: Date): Date {
   return d;
 }
 
-/** Stats for one project, restricted to plazaIds the caller may see. */
+function scoped(scope: Prisma.TaskWhereInput, extra: Prisma.TaskWhereInput) {
+  return { AND: [scope, extra] } satisfies Prisma.TaskWhereInput;
+}
+
+/** Stats for one project, restricted to the caller's task scope. */
 export async function projectStats(
   projectId: string,
-  plazaIds: string[],
+  scope: Prisma.TaskWhereInput,
 ): Promise<ProjectStats> {
-  const plazas = await db.plaza.findMany({
-    where: { projectId, id: { in: plazaIds } },
-    select: { id: true },
-  });
-  const ids = plazas.map((p) => p.id);
-  if (ids.length === 0) {
-    return { plazaCount: 0, total: 0, completed: 0, blocked: 0, overdue: 0, progressPct: 0 };
-  }
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [total, completed, blocked, overdue] = await Promise.all([
-    db.task.count({ where: { plazaId: { in: ids } } }),
-    db.task.count({ where: { plazaId: { in: ids }, status: "COMPLETED" } }),
-    db.task.count({ where: { plazaId: { in: ids }, status: "BLOCKED" } }),
+  const [plazaCount, total, completed, blocked, overdue] = await Promise.all([
+    db.plaza.count({ where: { projectId } }),
+    db.task.count({ where: scoped(scope, { projectId }) }),
     db.task.count({
-      where: { plazaId: { in: ids }, status: { not: "COMPLETED" }, dueDate: { lt: today } },
+      where: scoped(scope, { projectId, status: "COMPLETED" }),
+    }),
+    db.task.count({ where: scoped(scope, { projectId, status: "BLOCKED" }) }),
+    db.task.count({
+      where: scoped(scope, {
+        projectId,
+        status: { not: "COMPLETED" },
+        dueDate: { lt: startOfToday() },
+      }),
     }),
   ]);
   return {
-    plazaCount: ids.length,
+    plazaCount,
     total,
     completed,
     blocked,
@@ -59,20 +62,31 @@ export async function projectStats(
   };
 }
 
-/** Global KPIs across visible plazas. Single groupBy-style queries, no N+1. */
-export async function globalStats(plazaIds: string[]): Promise<GlobalStats> {
-  if (plazaIds.length === 0) return { open: 0, overdue: 0, blocked: 0, completedWeek: 0 };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+/** Global KPIs across the caller's visible task scope. */
+export async function globalStats(
+  scope: Prisma.TaskWhereInput,
+): Promise<GlobalStats> {
   const [open, overdue, blocked, completedWeek] = await Promise.all([
-    db.task.count({ where: { plazaId: { in: plazaIds }, status: { not: "COMPLETED" } } }),
+    db.task.count({ where: scoped(scope, { status: { not: "COMPLETED" } }) }),
     db.task.count({
-      where: { plazaId: { in: plazaIds }, status: { not: "COMPLETED" }, dueDate: { lt: today } },
+      where: scoped(scope, {
+        status: { not: "COMPLETED" },
+        dueDate: { lt: startOfToday() },
+      }),
     }),
-    db.task.count({ where: { plazaId: { in: plazaIds }, status: "BLOCKED" } }),
+    db.task.count({ where: scoped(scope, { status: "BLOCKED" }) }),
     db.task.count({
-      where: { plazaId: { in: plazaIds }, status: "COMPLETED", completedAt: { gte: startOfWeekIST(new Date()) } },
+      where: scoped(scope, {
+        status: "COMPLETED",
+        completedAt: { gte: startOfWeekIST(new Date()) },
+      }),
     }),
   ]);
   return { open, overdue, blocked, completedWeek };
+}
+
+function startOfToday(): Date {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
 }

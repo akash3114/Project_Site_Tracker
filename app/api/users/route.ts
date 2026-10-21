@@ -1,143 +1,112 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { Prisma } from "@prisma/client";
 
-import {
-  accessiblePlazaIds,
-  expandedPlazaIds,
-  getSessionUser,
-} from "@/lib/access";
+import { getSessionUser } from "@/lib/access";
 import { db } from "@/lib/db";
+import type { Role } from "@/lib/labels";
 import { userSchema } from "@/lib/validations";
 
-const safeSelect = {
-  id: true,
-  name: true,
-  email: true,
-  phone: true,
-  role: true,
-  active: true,
-  createdAt: true,
-  updatedAt: true,
+const assignmentInclude = {
+  companyAssignments: { select: { companyId: true, role: true } },
+  projectAssignments: { select: { projectId: true } },
+  plazaAssignments: { select: { plazaId: true, role: true } },
 } as const;
 
-/**
- * GET /api/users → ADMIN sees all; MANAGEMENT sees users sharing its
- * visible plazas; MANAGER gets 403. plazaIds are expanded (direct plaza
- * assignments + project-assignment plazas), filtered to visible for
- * non-admins.
- */
-export async function GET() {
+function displayRole(user: {
+  isAdmin: boolean;
+  companyAssignments: unknown[];
+}): Role {
+  if (user.isAdmin) return "ADMIN";
+  if (user.companyAssignments.length > 0) return "HEAD_OFFICE";
+  return "PROJECT_MANAGER";
+}
+
+/** GET /api/users → Admin/Head Office directory with assignment ids. */
+export async function GET(): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role === "MANAGER")
+  if (!user.isAdmin && user.role !== "HEAD_OFFICE") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const visible = await accessiblePlazaIds(user.id, user.role);
-  const visibleSet = new Set(visible);
-
-  if (user.role === "ADMIN") {
-    const users = await db.user.findMany({
-      select: safeSelect,
-      orderBy: { email: "asc" },
-    });
-    const withPlazas = await Promise.all(
-      users.map(async (u) => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        phone: u.phone,
-        role: u.role,
-        active: u.active,
-        plazaIds: await expandedPlazaIds(u.id),
-        createdAt: u.createdAt,
-        updatedAt: u.updatedAt,
-      })),
-    );
-    return NextResponse.json(withPlazas);
   }
 
-  // MANAGEMENT: users sharing at least one visible plaza.
-  const [direct, viaProjects] = await Promise.all([
-    db.plazaAssignment.findMany({
-      where: { plazaId: { in: visible } },
-      select: { userId: true, plazaId: true },
-    }),
-    db.projectAssignment.findMany({
-      select: { userId: true, project: { select: { plazas: { select: { id: true } } } } },
-    }),
-  ]);
-  const ids = new Set<string>(direct.map((r) => r.userId));
-  for (const pa of viaProjects) {
-    if (pa.project.plazas.some((z) => visibleSet.has(z.id))) ids.add(pa.userId);
-  }
-  ids.add(user.id);
   const users = await db.user.findMany({
-    where: { id: { in: Array.from(ids) } },
-    select: safeSelect,
-    orderBy: { email: "asc" },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      isAdmin: true,
+      active: true,
+      createdAt: true,
+      updatedAt: true,
+      ...assignmentInclude,
+    },
+    orderBy: { name: "asc" },
   });
-  const withPlazas = await Promise.all(
-    users.map(async (u) => ({
+
+  return NextResponse.json(
+    users.map((u) => ({
       id: u.id,
       name: u.name,
       email: u.email,
       phone: u.phone,
-      role: u.role,
+      role: displayRole(u),
+      isAdmin: u.isAdmin,
       active: u.active,
-      // Only reveal plaza ids the manager may itself see.
-      plazaIds: (await expandedPlazaIds(u.id)).filter((id) =>
-        visibleSet.has(id),
-      ),
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
+      companyIds: u.companyAssignments.map((r) => r.companyId),
+      projectIds: u.projectAssignments.map((r) => r.projectId),
+      plazaIds: u.plazaAssignments.map((r) => r.plazaId),
+      plazaRoles: u.plazaAssignments,
     })),
   );
-  return NextResponse.json(withPlazas);
 }
 
-/** POST /api/users → ADMIN only. bcrypt(12). 409 on duplicate email. */
-export async function POST(req: Request) {
+/** POST /api/users → Admin only. */
+export async function POST(req: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ADMIN")
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user.isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body: unknown = await req.json().catch(() => null);
   const parsed = userSchema.safeParse(body);
-  if (!parsed.success)
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid input", issues: parsed.error.issues },
+      { error: "Invalid input", issues: parsed.error.flatten() },
       { status: 400 },
     );
+  }
 
   const email = parsed.data.email.toLowerCase();
-  const dup = await db.user.findUnique({ where: { email } });
-  if (dup)
-    return NextResponse.json(
-      { error: "Email already exists" },
-      { status: 409 },
-    );
-
-  try {
-    const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-    const created = await db.user.create({
-      data: {
-        name: parsed.data.name,
-        email,
-        phone: parsed.data.phone,
-        passwordHash,
-        role: parsed.data.role,
-      },
-      select: safeSelect,
-    });
-    return NextResponse.json(created, { status: 201 });
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
-      return NextResponse.json(
-        { error: "Email already exists" },
-        { status: 409 },
-      );
-    throw e;
+  const exists = await db.user.findUnique({ where: { email } });
+  if (exists) {
+    return NextResponse.json({ error: "Email already in use" }, { status: 409 });
   }
+
+  const created = await db.user.create({
+    data: {
+      name: parsed.data.name,
+      email,
+      phone: parsed.data.phone ?? null,
+      passwordHash: await bcrypt.hash(parsed.data.password, 12),
+      isAdmin: parsed.data.isAdmin,
+      active: true,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      isAdmin: true,
+      active: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return NextResponse.json(
+    { ...created, role: created.isAdmin ? "ADMIN" : "PROJECT_MANAGER" },
+    { status: 201 },
+  );
 }

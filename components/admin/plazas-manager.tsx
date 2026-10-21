@@ -1,18 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Project = { id: string; name: string };
+type Company = { id: string; name: string; code: string };
+
+type Project = {
+  id: string;
+  name: string;
+  acronym: string | null;
+  round: string;
+  active: boolean;
+  company?: Company | null;
+};
+
 type PlazaItem = {
   id: string;
   projectId: string;
-  project?: { id: string; name: string };
+  project?: {
+    id: string;
+    name: string;
+    acronym: string | null;
+    company?: Company | null;
+  } | null;
   name: string;
   lengthKm: number | null;
   state: string | null;
   piu: string | null;
   ro: string | null;
-  status: string;
+  active: boolean;
   task: { total: number; completed: number; blocked: number; overdue: number };
   progressPct: number;
 };
@@ -32,7 +47,7 @@ const thCls =
   "px-3 py-2 text-left font-mono text-xs font-medium uppercase tracking-wide text-[#66756D]";
 const tdCls = "px-3 py-2 text-sm text-[#1C2824]";
 const btnCls =
-  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#1C2824]";
+  "inline-flex min-h-[44px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-4 text-sm font-medium text-[#1C2824] disabled:opacity-50";
 const primaryBtnCls =
   "inline-flex min-h-[44px] items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50";
 
@@ -43,21 +58,37 @@ const emptyForm = {
   state: "",
   piu: "",
   ro: "",
-  status: "ACTIVE",
+  active: true,
 };
+
+function statusPill(active: boolean) {
+  return (
+    <span
+      className={`inline-flex rounded px-1.5 py-0.5 font-mono text-[11px] font-medium uppercase tracking-wide ${
+        active
+          ? "bg-[#E8F0DD] text-[#385A2B]"
+          : "bg-[#F5F5EF] text-[#586760]"
+      }`}
+    >
+      {active ? "Active" : "Archived"}
+    </span>
+  );
+}
 
 /** ADMIN plazas table + create/edit forms wired to /api/plazas. */
 export function PlazasManager() {
   const [items, setItems] = useState<PlazaItem[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [companyFilter, setCompanyFilter] = useState("");
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [editStatus, setEditStatus] = useState("ACTIVE");
+  const [editActive, setEditActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -66,13 +97,17 @@ export function PlazasManager() {
     setError(null);
     try {
       const [pr, pl] = await Promise.all([
-        fetch("/api/projects"),
-        fetch(filter ? `/api/plazas?projectId=${filter}` : "/api/plazas"),
+        fetch("/api/projects", { credentials: "same-origin" }),
+        fetch(
+          filter
+            ? `/api/plazas?projectId=${encodeURIComponent(filter)}`
+            : "/api/plazas",
+          { credentials: "same-origin" },
+        ),
       ]);
       if (!pr.ok) throw new Error(await readError(pr));
       if (!pl.ok) throw new Error(await readError(pl));
-      const pj = (await pr.json()) as { id: string; name: string }[];
-      setProjects(pj.map((p) => ({ id: p.id, name: p.name })));
+      setProjects((await pr.json()) as Project[]);
       setItems((await pl.json()) as PlazaItem[]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load plazas");
@@ -84,6 +119,33 @@ export function PlazasManager() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const companies = useMemo(() => {
+    const map = new Map<string, Company>();
+    for (const project of projects) {
+      if (project.company) map.set(project.company.id, project.company);
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [projects]);
+
+  const projectOptions = useMemo(
+    () =>
+      companyFilter
+        ? projects.filter((p) => p.company?.id === companyFilter)
+        : projects,
+    [projects, companyFilter],
+  );
+
+  function changeCompany(value: string) {
+    setCompanyFilter(value);
+    if (!value) return;
+    const current = projects.find((p) => p.id === filter);
+    if (!current || current.company?.id !== value) setFilter("");
+    const formProject = projects.find((p) => p.id === form.projectId);
+    if (formProject && formProject.company?.id !== value) {
+      setForm((prev) => ({ ...prev, projectId: "" }));
+    }
+  }
 
   function clean(body: Record<string, string>) {
     const out: Record<string, string> = {};
@@ -114,13 +176,15 @@ export function PlazasManager() {
     }
     setSaving(true);
     setFormError(null);
+    setNotice(null);
     try {
       const res = await fetch("/api/plazas", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: form.projectId,
-          status: form.status,
+          active: form.active,
           ...(lengthKm !== undefined ? { lengthKm } : null),
           ...clean({
             name: form.name,
@@ -133,6 +197,7 @@ export function PlazasManager() {
       if (!res.ok) throw new Error(await readError(res));
       setForm(emptyForm);
       setShowCreate(false);
+      setNotice("Plaza created");
       await load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Create failed");
@@ -148,14 +213,39 @@ export function PlazasManager() {
     }
     setSaving(true);
     setFormError(null);
+    setNotice(null);
     try {
+      // updatePlazaSchema omits projectId — never send it on PATCH.
       const res = await fetch(`/api/plazas/${id}`, {
         method: "PATCH",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim(), status: editStatus }),
+        body: JSON.stringify({ name: editName.trim(), active: editActive }),
       });
       if (!res.ok) throw new Error(await readError(res));
       setEditingId(null);
+      setNotice("Plaza updated");
+      await load();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(z: PlazaItem) {
+    setSaving(true);
+    setFormError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/plazas/${z.id}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !z.active }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      setNotice(z.active ? "Plaza archived" : "Plaza restored");
       await load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Update failed");
@@ -167,32 +257,58 @@ export function PlazasManager() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#586760]">
-          Project
-          <select
-            className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 text-sm text-[#1C2824]"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="">All projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#586760]">
+            Company
+            <select
+              className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 text-sm text-[#1C2824]"
+              value={companyFilter}
+              onChange={(e) => changeCompany(e.target.value)}
+            >
+              <option value="">All companies</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.code} — {company.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-h-[44px] items-center gap-2 text-sm text-[#586760]">
+            Project
+            <select
+              className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 text-sm text-[#1C2824]"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="">All projects</option>
+              {projectOptions.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.company?.code ? `${project.company.code} — ` : ""}
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <button
           type="button"
           onClick={() => {
             setShowCreate((v) => !v);
             setFormError(null);
+            setNotice(null);
           }}
           className={primaryBtnCls}
         >
           New plaza
         </button>
       </div>
+
+      {notice ? <p className="text-sm text-[#385A2B]">{notice}</p> : null}
+      {error ? (
+        <p role="alert" className="text-sm text-[#8F2824]">
+          {error}
+        </p>
+      ) : null}
 
       {showCreate ? (
         <form
@@ -208,9 +324,11 @@ export function PlazasManager() {
               required
             >
               <option value="">Select…</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
+              {projectOptions.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.company?.code ? `${project.company.code} — ` : ""}
+                  {project.name}
+                  {project.active ? "" : " (archived)"}
                 </option>
               ))}
             </select>
@@ -266,12 +384,13 @@ export function PlazasManager() {
             Status
             <select
               className={inputCls}
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
+              value={form.active ? "ACTIVE" : "ARCHIVED"}
+              onChange={(e) =>
+                setForm({ ...form, active: e.target.value === "ACTIVE" })
+              }
             >
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="ON_HOLD">ON_HOLD</option>
-              <option value="COMPLETED">COMPLETED</option>
+              <option value="ACTIVE">Active</option>
+              <option value="ARCHIVED">Archived</option>
             </select>
           </label>
           {formError ? (
@@ -302,19 +421,18 @@ export function PlazasManager() {
 
       {loading ? (
         <p className="text-sm text-[#586760]">Loading plazas…</p>
-      ) : error ? (
-        <p role="alert" className="text-sm text-[#8F2824]">
-          {error}
-        </p>
       ) : (
         <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
-          <table className="w-full min-w-[760px] border-collapse">
+          <table className="w-full min-w-[1080px] border-collapse">
             <thead>
               <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
                 <th className={thCls}>Plaza</th>
+                <th className={thCls}>Company</th>
                 <th className={thCls}>Project</th>
                 <th className={thCls}>Length</th>
                 <th className={thCls}>State</th>
+                <th className={thCls}>PIU</th>
+                <th className={thCls}>RO</th>
                 <th className={thCls}>Status</th>
                 <th className={thCls}>Tasks</th>
                 <th className={thCls}>Done</th>
@@ -343,24 +461,30 @@ export function PlazasManager() {
                       z.name
                     )}
                   </td>
+                  <td className={`${tdCls} font-mono text-xs`}>
+                    {z.project?.company?.code ?? "—"}
+                  </td>
                   <td className={tdCls}>{z.project?.name ?? z.projectId}</td>
                   <td className={tdCls}>
                     {typeof z.lengthKm === "number" ? `${z.lengthKm} km` : "—"}
                   </td>
                   <td className={tdCls}>{z.state ?? "—"}</td>
+                  <td className={tdCls}>{z.piu ?? "—"}</td>
+                  <td className={tdCls}>{z.ro ?? "—"}</td>
                   <td className={tdCls}>
                     {editingId === z.id ? (
                       <select
                         className={inputCls}
-                        value={editStatus}
-                        onChange={(e) => setEditStatus(e.target.value)}
+                        value={editActive ? "ACTIVE" : "ARCHIVED"}
+                        onChange={(e) =>
+                          setEditActive(e.target.value === "ACTIVE")
+                        }
                       >
-                        <option value="ACTIVE">ACTIVE</option>
-                        <option value="ON_HOLD">ON_HOLD</option>
-                        <option value="COMPLETED">COMPLETED</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="ARCHIVED">Archived</option>
                       </select>
                     ) : (
-                      z.status
+                      statusPill(z.active)
                     )}
                   </td>
                   <td className={tdCls}>{z.task.total}</td>
@@ -370,7 +494,7 @@ export function PlazasManager() {
                   <td className={tdCls}>{z.progressPct}%</td>
                   <td className={tdCls}>
                     {editingId === z.id ? (
-                      <span className="flex gap-2">
+                      <span className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => void update(z.id)}
@@ -388,18 +512,29 @@ export function PlazasManager() {
                         </button>
                       </span>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingId(z.id);
-                          setEditName(z.name);
-                          setEditStatus(z.status);
-                          setFormError(null);
-                        }}
-                        className={btnCls}
-                      >
-                        Edit
-                      </button>
+                      <span className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(z.id);
+                            setEditName(z.name);
+                            setEditActive(z.active);
+                            setFormError(null);
+                            setNotice(null);
+                          }}
+                          className={btnCls}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void toggleActive(z)}
+                          disabled={saving}
+                          className={btnCls}
+                        >
+                          {z.active ? "Archive" : "Restore"}
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -408,6 +543,12 @@ export function PlazasManager() {
           </table>
         </div>
       )}
+
+      {!loading && items.length === 0 ? (
+        <p className="text-sm text-[#586760]">
+          No plazas match this filter.
+        </p>
+      ) : null}
     </div>
   );
 }

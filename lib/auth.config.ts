@@ -2,12 +2,12 @@ import type { DefaultSession, NextAuthConfig } from "next-auth";
 
 declare module "next-auth" {
   interface User {
-    role?: string;
+    isAdmin?: boolean;
   }
   interface Session {
     user: {
       id: string;
-      role?: string;
+      isAdmin?: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -15,7 +15,7 @@ declare module "next-auth" {
 type TokenShape = {
   id?: string;
   sub?: string;
-  role?: string;
+  isAdmin?: boolean;
 };
 
 /**
@@ -29,10 +29,10 @@ export const authConfig = {
   providers: [],
   callbacks: {
     async jwt({ token, user }) {
-      const u = user as unknown as { id?: string; role?: string } | undefined;
-      if (u?.role !== undefined) {
+      const u = user as unknown as { id?: string; isAdmin?: boolean } | undefined;
+      if (u?.id !== undefined) {
         (token as unknown as TokenShape).id = u.id;
-        (token as unknown as TokenShape).role = u.role;
+        (token as unknown as TokenShape).isAdmin = u.isAdmin;
       }
       return token;
     },
@@ -40,7 +40,7 @@ export const authConfig = {
       const t = token as unknown as TokenShape;
       if (session.user) {
         session.user.id = t.id ?? t.sub ?? "";
-        session.user.role = t.role;
+        session.user.isAdmin = t.isAdmin;
       }
       return session;
     },

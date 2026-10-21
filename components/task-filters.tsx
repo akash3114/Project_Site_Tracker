@@ -5,17 +5,24 @@ export type TaskStatusFilter =
   | "IN_PROGRESS"
   | "BLOCKED"
   | "COMPLETED";
-export type TaskPriorityFilter = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type TaskPriorityFilter = "LOW" | "MEDIUM" | "HIGH";
 
 export type TaskFilters = {
   status?: TaskStatusFilter[];
   priority?: TaskPriorityFilter[];
+  categoryId?: string;
   assigneeId?: string;
   overdueOnly?: boolean;
   q?: string;
 };
 
 export type AssigneeOption = { id: string; name: string };
+export type CategoryOption = {
+  id: string;
+  name: string;
+  active?: boolean;
+  taskCount?: number;
+};
 
 const STATUSES: TaskStatusFilter[] = [
   "TODO",
@@ -23,7 +30,7 @@ const STATUSES: TaskStatusFilter[] = [
   "BLOCKED",
   "COMPLETED",
 ];
-const PRIORITIES: TaskPriorityFilter[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+const PRIORITIES: TaskPriorityFilter[] = ["LOW", "MEDIUM", "HIGH"];
 
 function selectClass(extra = "") {
   return `min-h-[44px] rounded-[6px] border border-[#CDD6CE] bg-white px-3 font-body text-sm text-[#1C2824] pst-transition ${extra}`;
@@ -31,17 +38,21 @@ function selectClass(extra = "") {
 
 /**
  * Sticky-friendly filter controls for the plaza tasks view.
- * Single-select status/priority map to the API's `status=`/`priority=`
- * params; the TaskFilters type keeps arrays for forward-compat.
+ * Single-select status/priority/category map to the API's
+ * `status=`/`priority=`/`categoryId=` params; the TaskFilters type keeps
+ * arrays for forward-compat.
  */
 export function TaskFiltersBar({
   filters,
   onChange,
   assignees,
+  categories = [],
 }: {
   filters: TaskFilters;
   onChange: (next: TaskFilters) => void;
   assignees: AssigneeOption[];
+  /** Optional admin-managed categories; the select is hidden when empty. */
+  categories?: CategoryOption[];
 }) {
   const status = filters.status?.[0] ?? "";
   const priority = filters.priority?.[0] ?? "";
@@ -95,6 +106,23 @@ export function TaskFiltersBar({
           </option>
         ))}
       </select>
+      {categories.length > 0 ? (
+        <select
+          aria-label="Filter by category"
+          value={filters.categoryId ?? ""}
+          onChange={(e) =>
+            onChange({ ...filters, categoryId: e.target.value || undefined })
+          }
+          className={selectClass()}
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
       <select
         aria-label="Filter by assignee"
         value={filters.assigneeId ?? ""}
@@ -124,7 +152,12 @@ export function TaskFiltersBar({
       >
         Overdue only
       </button>
-      {(status || priority || filters.assigneeId || filters.overdueOnly || filters.q) ? (
+      {(status ||
+        priority ||
+        filters.categoryId ||
+        filters.assigneeId ||
+        filters.overdueOnly ||
+        filters.q) ? (
         <button
           type="button"
           onClick={() => onChange({})}

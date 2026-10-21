@@ -1,34 +1,45 @@
-import { auth } from "@/lib/auth";
-import { accessiblePlazaIds } from "@/lib/access";
+import { NextResponse } from "next/server";
+
+import {
+  canViewAudit,
+  getSessionUser,
+  taskScopeWhere,
+} from "@/lib/access";
 import { db } from "@/lib/db";
 
-/** GET /api/events?take=100 — read-only audit feed. Admin: all; Management: accessible plazas. */
+/** GET /api/events?take=100 — append-only task activity feed. */
 export async function GET(req: Request): Promise<Response> {
-  const session = await auth();
-  if (!session?.user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const role = (session.user as { role?: string }).role;
-  if (role !== "ADMIN" && role !== "MANAGEMENT") {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!canViewAudit(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
   const url = new URL(req.url);
-  const take = Math.min(Math.max(Number(url.searchParams.get("take") ?? 100), 1), 500);
+  const take = Math.min(
+    Math.max(Number(url.searchParams.get("take") ?? 100), 1),
+    500,
+  );
+  const scope = await taskScopeWhere(user);
 
-  const userId = (session.user as { id: string }).id;
-  const where =
-    role === "ADMIN"
-      ? {}
-      : {
-          task: { plazaId: { in: await accessiblePlazaIds(userId, role as "MANAGEMENT") } },
-        };
-
-  const events = await db.taskEvent.findMany({
-    where,
+  const events = await db.taskActivity.findMany({
+    where: { task: scope },
     orderBy: { createdAt: "desc" },
     take,
     include: {
       actor: { select: { id: true, name: true } },
-      task: { select: { id: true, title: true, plazaId: true } },
+      fromAssignee: { select: { id: true, name: true } },
+      toAssignee: { select: { id: true, name: true } },
+      task: {
+        select: {
+          id: true,
+          title: true,
+          project: { select: { id: true, name: true } },
+          plaza: { select: { id: true, name: true } },
+        },
+      },
     },
   });
-  return Response.json({ items: events });
+
+  return NextResponse.json({ items: events });
 }

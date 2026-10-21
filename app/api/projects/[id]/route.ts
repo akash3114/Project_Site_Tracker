@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 
-import { accessiblePlazaIds, canManage, getSessionUser } from "@/lib/access";
+import {
+  canManageProjects,
+  getSessionUser,
+  requireProjectAccess,
+  taskScopeWhere,
+} from "@/lib/access";
 import { db } from "@/lib/db";
 import { projectStats } from "@/lib/stats";
 import { updateProjectSchema } from "@/lib/validations";
@@ -9,86 +13,104 @@ import { updateProjectSchema } from "@/lib/validations";
 type Ctx = { params: { id: string } };
 
 /** GET /api/projects/:id → scoped detail with stats. */
-export async function GET(_req: Request, { params }: Ctx) {
+export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const project = await db.project.findUnique({ where: { id: params.id } });
+  await requireProjectAccess(user, params.id);
+
+  const project = await db.project.findUnique({
+    where: { id: params.id },
+    include: {
+      company: { select: { id: true, name: true, code: true } },
+      _count: { select: { plazas: true } },
+    },
+  });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const visible = await accessiblePlazaIds(user.id, user.role);
-  if (user.role === "MANAGER") {
-    const inScope = await db.plaza.findFirst({
-      where: { projectId: project.id, id: { in: visible } },
-      select: { id: true },
-    });
-    if (!inScope)
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const stats = await projectStats(project.id, await taskScopeWhere(user));
 
-  const s = await projectStats(project.id, visible);
   return NextResponse.json({
     id: project.id,
     name: project.name,
+    description: null,
     acronym: project.acronym,
+    state: project.state,
     round: project.round,
-    status: project.status,
-    plazaCount: s.plazaCount,
+    lengthKm: project.lengthKm,
+    piu: project.piu,
+    ro: project.ro,
+    active: project.active,
+    status: project.active ? "ACTIVE" : "ARCHIVED",
+    company: project.company,
+    plazaCount: project._count.plazas,
     task: {
-      total: s.total,
-      completed: s.completed,
-      blocked: s.blocked,
-      overdue: s.overdue,
+      total: stats.total,
+      completed: stats.completed,
+      blocked: stats.blocked,
+      overdue: stats.overdue,
     },
-    progressPct: s.progressPct,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
+    progressPct: stats.progressPct,
   });
 }
 
-/** PATCH /api/projects/:id → ADMIN + MANAGEMENT. 409 on (name, round) clash. */
-export async function PATCH(req: Request, { params }: Ctx) {
+/** PATCH /api/projects/:id → Admin / Head Office. */
+export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!canManage(user.role))
+  if (!canManageProjects(user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const body: unknown = await req.json().catch(() => null);
+  const parsed = updateProjectSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid input", issues: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
 
   const project = await db.project.findUnique({ where: { id: params.id } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const body: unknown = await req.json().catch(() => null);
-  const parsed = updateProjectSchema.safeParse(body);
-  if (!parsed.success)
-    return NextResponse.json(
-      { error: "Invalid input", issues: parsed.error.issues },
-      { status: 400 },
-    );
-
-  const nextName = parsed.data.name ?? project.name;
-  const nextRound = parsed.data.round ?? project.round;
-  if (nextName !== project.name || nextRound !== project.round) {
-    const dup = await db.project.findFirst({
-      where: { name: nextName, round: nextRound, id: { not: project.id } },
+  if (parsed.data.companyId) {
+    const company = await db.company.findUnique({
+      where: { id: parsed.data.companyId },
+      select: { id: true },
     });
-    if (dup)
-      return NextResponse.json(
-        { error: "Project already exists in this round" },
-        { status: 409 },
-      );
+    if (!company) {
+      return NextResponse.json({ error: "Company not found" }, { status: 404 });
+    }
   }
 
-  try {
-    const updated = await db.project.update({
-      where: { id: params.id },
-      data: parsed.data,
-    });
-    return NextResponse.json(updated);
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
-      return NextResponse.json(
-        { error: "Project already exists in this round" },
-        { status: 409 },
-      );
-    throw e;
-  }
+  const updated = await db.project.update({
+    where: { id: params.id },
+    data: {
+      ...(parsed.data.companyId !== undefined
+        ? { companyId: parsed.data.companyId }
+        : {}),
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+      ...(parsed.data.acronym !== undefined
+        ? { acronym: parsed.data.acronym ?? null }
+        : {}),
+      ...(parsed.data.round !== undefined ? { round: parsed.data.round } : {}),
+      ...(parsed.data.state !== undefined
+        ? { state: parsed.data.state ?? null }
+        : {}),
+      ...(parsed.data.lengthKm !== undefined
+        ? { lengthKm: parsed.data.lengthKm ?? null }
+        : {}),
+      ...(parsed.data.piu !== undefined
+        ? { piu: parsed.data.piu ?? null }
+        : {}),
+      ...(parsed.data.ro !== undefined ? { ro: parsed.data.ro ?? null } : {}),
+      ...(parsed.data.active !== undefined
+        ? { active: parsed.data.active }
+        : {}),
+    },
+    include: { company: { select: { id: true, name: true, code: true } } },
+  });
+
+  return NextResponse.json(updated);
 }

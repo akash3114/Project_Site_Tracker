@@ -3,6 +3,14 @@
 import { fmtDate, isOverdue } from "@/lib/format";
 import { StatusBadge } from "./status-badge";
 
+type TaskProjectRef = {
+  id: string;
+  name: string;
+  acronym?: string | null;
+  round?: string | null;
+  company?: { id: string; name: string; code?: string | null } | null;
+};
+
 export type PlazaTaskItem = {
   id: string;
   title: string;
@@ -11,16 +19,28 @@ export type PlazaTaskItem = {
   priority: string;
   dueDate?: string | null;
   updatedAt?: string | null;
-  plaza?: { id: string; name: string; project?: { id: string; name: string } };
+  /** Always present on task API rows (project-level tasks have no plaza). */
+  project?: TaskProjectRef | null;
+  /** Null for project-level tasks. */
+  plaza?: {
+    id: string;
+    name: string;
+    state?: string | null;
+    lengthKm?: number | null;
+    piu?: string | null;
+    ro?: string | null;
+    project?: { id: string; name: string } | null;
+  } | null;
+  category?: { id: string; name: string } | null;
   assignee?: { id: string; name: string } | null;
   createdBy?: { id: string; name: string } | null;
+  completedBy?: { id: string; name: string } | null;
 };
 
 const PRIORITY_STYLES: Record<string, string> = {
   LOW: "bg-slate-500/10 text-slate-600 border-slate-500/25",
   MEDIUM: "bg-[#173B33]/10 text-[#173B33] border-[#173B33]/30",
   HIGH: "bg-[#FFF1CC] text-[#704900] border-amber-500/40",
-  CRITICAL: "bg-[#FBE8E4] text-[#8F2824] border-red-500/40",
 };
 
 export function PriorityBadge({ priority }: { priority: string }) {
@@ -31,6 +51,44 @@ export function PriorityBadge({ priority }: { priority: string }) {
       className={`inline-flex min-h-[28px] min-w-[44px] items-center justify-center rounded-[6px] border px-2 py-1 font-mono text-xs font-medium pst-transition ${style}`}
     >
       {priority}
+    </span>
+  );
+}
+
+/** Project/company context shared by the table and mobile cards. */
+function taskContext(task: PlazaTaskItem) {
+  const project = task.project ?? task.plaza?.project ?? null;
+  const company = task.project?.company ?? null;
+  return {
+    projectName: project?.name ?? null,
+    projectAcronym: task.project?.acronym ?? null,
+    companyName: company?.name ?? null,
+  };
+}
+
+function TaskContextLine({ task }: { task: PlazaTaskItem }) {
+  const { projectName, projectAcronym, companyName } = taskContext(task);
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-[#66756D]">
+      {task.plaza ? (
+        <span>{task.plaza.name}</span>
+      ) : (
+        <span className="rounded-[4px] border border-[#CDD6CE] bg-[#F5F5EF] px-1.5 py-0.5 font-medium text-[#173B33]">
+          Project-level
+        </span>
+      )}
+      {projectName ? (
+        <span>
+          {projectAcronym ? `${projectAcronym} · ` : ""}
+          {projectName}
+        </span>
+      ) : null}
+      {companyName ? <span>{companyName}</span> : null}
+      {task.category ? (
+        <span className="rounded-[4px] border border-[#CDD6CE] bg-white px-1.5 py-0.5 text-[#586760]">
+          {task.category.name}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -57,14 +115,14 @@ export function TaskTable({
     <>
       {/* Desktop / tablet table */}
       <div className="hidden overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white shadow-[0_1px_2px_rgba(23,34,44,0.04)] md:block">
-        <table className="w-full min-w-[720px] text-left font-body text-sm">
+        <table className="w-full min-w-[820px] text-left font-body text-sm">
           <thead>
             <tr className="border-b border-[#CDD6CE] font-mono text-xs uppercase text-[#586760]">
               <th scope="col" className="p-4 font-medium">
                 Status
               </th>
               <th scope="col" className="p-4 font-medium">
-                Title
+                Task
               </th>
               <th scope="col" className="p-4 font-medium">
                 Assignee
@@ -93,27 +151,30 @@ export function TaskTable({
                   tabIndex={0}
                   className="cursor-pointer border-b border-[#CDD6CE] pst-transition last:border-0 hover:bg-[#FAFBFC]"
                 >
-                  <td className="p-4">
+                  <td className="p-4 align-top">
                     <StatusBadge status={task.status} />
                   </td>
                   <td className="p-4">
                     <span className="font-medium text-[#1C2824]">
                       {task.title}
                     </span>
+                    <span className="mt-1 block">
+                      <TaskContextLine task={task} />
+                    </span>
                   </td>
-                  <td className="p-4 text-[#1C2824]">
+                  <td className="p-4 align-top text-[#1C2824]">
                     {task.assignee?.name ?? "—"}
                   </td>
-                  <td className="p-4">
+                  <td className="p-4 align-top">
                     <PriorityBadge priority={task.priority} />
                   </td>
                   <td
-                    className={`p-4 font-mono text-xs ${overdue ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}
+                    className={`p-4 align-top font-mono text-xs ${overdue ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}
                   >
                     {fmtDate(task.dueDate)}
                     {overdue ? " · overdue" : ""}
                   </td>
-                  <td className="p-4 font-mono text-xs text-[#586760]">
+                  <td className="p-4 align-top font-mono text-xs text-[#586760]">
                     {fmtDate(task.updatedAt)}
                   </td>
                 </tr>
@@ -141,6 +202,7 @@ export function TaskTable({
               <span className="font-display text-base font-semibold tracking-[-0.02em] text-[#1C2824]">
                 {task.title}
               </span>
+              <TaskContextLine task={task} />
               <span className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-[#586760]">
                 <span>{task.assignee?.name ?? "Unassigned"}</span>
                 <span

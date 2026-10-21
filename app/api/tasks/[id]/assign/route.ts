@@ -1,88 +1,76 @@
-import type { Role } from "@prisma/client";
+import { NextResponse } from "next/server";
 
-import { auth } from "@/lib/auth";
 import {
-  assigneeHasPlazaAccess,
-  canAssign,
-  requirePlazaAccess,
+  canAssignTo,
+  getSessionUser,
+  requireTaskAccess,
 } from "@/lib/access";
 import { db } from "@/lib/db";
 import { assignSchema } from "@/lib/validations";
 
-type SessionUser = { id: string; role: Role };
-
-async function sessionUser(): Promise<SessionUser | null> {
-  const session = await auth();
-  const u = session?.user as unknown as
-    | { id?: string; role?: Role }
-    | undefined;
-  if (!u?.id || !u?.role) return null;
-  return { id: u.id, role: u.role };
-}
-
+/** POST /api/tasks/:id/assign → change or clear the assignee. */
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
 ): Promise<Response> {
   try {
-    const user = await sessionUser();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-    if (!canAssign(user.role)) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body: unknown = await req.json().catch(() => null);
     const parsed = assignSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(
+      return NextResponse.json(
         { error: "Invalid input", issues: parsed.error.flatten() },
         { status: 400 },
       );
     }
     const { assigneeId } = parsed.data;
 
-    const task = await db.task.findUnique({
-      where: { id: params.id },
-      select: { id: true, status: true, plazaId: true, plaza: { select: { projectId: true } } },
-    });
-    if (!task) return Response.json({ error: "Not found" }, { status: 404 });
-
-    await requirePlazaAccess(user, task.plazaId);
+    const access = await requireTaskAccess(user, params.id);
+    if (access.task.status === "COMPLETED") {
+      return NextResponse.json(
+        { error: "Task is completed. Reopen it before reassigning." },
+        { status: 423 },
+      );
+    }
 
     if (
-      !(await assigneeHasPlazaAccess(
+      assigneeId &&
+      !(await canAssignTo(
+        access.role,
+        access.task.projectId,
+        access.task.plazaId,
         assigneeId,
-        task.plazaId,
-        task.plaza.projectId,
       ))
     ) {
-      return Response.json(
-        { error: "Assignee has no access to this plaza" },
+      return NextResponse.json(
+        { error: "That person cannot be assigned in this scope" },
         { status: 422 },
       );
     }
 
     const updated = await db.$transaction(async (tx) => {
       const next = await tx.task.update({
-        where: { id: task.id },
-        data: { assigneeId },
+        where: { id: params.id },
+        data: { assigneeId: assigneeId ?? null },
         include: { assignee: { select: { id: true, name: true } } },
       });
-      await tx.taskEvent.create({
+      await tx.taskActivity.create({
         data: {
-          taskId: task.id,
+          taskId: params.id,
           actorId: user.id,
-          type: "ASSIGN",
-          fromStatus: task.status,
-          toStatus: task.status,
-          text: assigneeId,
+          type: "ASSIGNED",
+          fromStatus: access.task.status,
+          toStatus: access.task.status,
+          fromAssigneeId: access.task.assigneeId,
+          toAssigneeId: assigneeId ?? null,
         },
       });
       return next;
     });
 
-    return Response.json(updated, { status: 200 });
+    return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

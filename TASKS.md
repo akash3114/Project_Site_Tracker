@@ -1,7 +1,7 @@
 # Project Site Tracker — TASKS.md (Pilot Build, Option A)
 
-> SUPERSEDED by the v2 design in `docs/DATABASE.md` (roles ADMIN | MANAGEMENT | MANAGER,
-> `project_assignments` / `plaza_assignments`, free-text state/piu/ro, round-required projects).
+> SUPERSEDED by the current design in `docs/DATABASE.md` (Company | Project | Plaza,
+> `company_assignments` / `project_assignments` / `plaza_assignments`, assignment-based roles).
 > Kept for build-phase history only — do not implement new work from this file.
 
 > Stack: Next.js 14+ App Router + TS + Tailwind + shadcn/ui + Prisma + Postgres 16 + Auth.js v5 Credentials.
@@ -11,9 +11,9 @@
 
 ---
 
-## 0. Dummy Data Contract (SUPERSEDED — see prisma/nhit-data.ts)
-> Real masters now come from `docs/NHIT Project List.xlsx` (parsed by `scripts/parse-nhit.py`):
-> 28 projects / 46 plazas, with every manager imported as a real login (94 users total).
+## 0. Dummy Data Contract (SUPERSEDED — see `docs/master-data.md`)
+> Real masters come only from `docs/master-data.md` (parsed by `scripts/parse-master-data.mjs`):
+> 3 companies / 28 projects / 46 plazas, with every field person imported as a real login (94 users total).
 > Apply with SEED_RESET=1 + seed (full wipe, pre-pilot only).
 
 ### 0.1 Projects (3)

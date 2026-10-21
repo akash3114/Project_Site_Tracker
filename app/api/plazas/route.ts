@@ -1,119 +1,169 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
-import { accessiblePlazaIds, canManage, getSessionUser } from "@/lib/access";
+import {
+  accessiblePlazaIds,
+  canManageProjects,
+  getSessionUser,
+  requireProjectAccess,
+  taskScopeWhere,
+} from "@/lib/access";
 import { db } from "@/lib/db";
 import { plazaProgress } from "@/lib/progress";
 import { plazaSchema } from "@/lib/validations";
 
 /** GET /api/plazas?projectId= → scoped list with per-plaza task stats. */
-export async function GET(req: Request) {
+export async function GET(req: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get("projectId") ?? undefined;
+  if (projectId) await requireProjectAccess(user, projectId);
 
-  const visible = await accessiblePlazaIds(user.id, user.role);
+  const ids = await accessiblePlazaIds(user);
+  const scope = await taskScopeWhere(user);
+  const where: Prisma.PlazaWhereInput = {
+    ...(projectId ? { projectId } : {}),
+    ...(user.isAdmin || user.role === "HEAD_OFFICE"
+      ? {}
+      : { id: { in: ids } }),
+  };
+
   const plazas = await db.plaza.findMany({
-    where: {
-      ...(projectId ? { projectId } : null),
-      ...(user.role === "MANAGER" ? { id: { in: visible } } : null),
+    where,
+    include: {
+      project: {
+        select: {
+          id: true,
+          name: true,
+          acronym: true,
+          company: { select: { id: true, name: true, code: true } },
+        },
+      },
     },
-    include: { project: { select: { id: true, name: true } } },
-    orderBy: { name: "asc" },
+    orderBy: [{ project: { name: "asc" } }, { name: "asc" }],
   });
 
+  const plazaIds = plazas.map((z) => z.id);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const items = await Promise.all(
-    plazas.map(async (plaza) => {
-      const [total, completed, blocked, overdue] = await Promise.all([
-        db.task.count({ where: { plazaId: plaza.id } }),
-        db.task.count({ where: { plazaId: plaza.id, status: "COMPLETED" } }),
-        db.task.count({ where: { plazaId: plaza.id, status: "BLOCKED" } }),
-        db.task.count({
-          where: {
-            plazaId: plaza.id,
+
+  const [statusCounts, overdueCounts] = await Promise.all([
+    db.task.groupBy({
+      by: ["plazaId", "status"],
+      where: { AND: [scope, { plazaId: { in: plazaIds } }] },
+      _count: { _all: true },
+    }),
+    db.task.groupBy({
+      by: ["plazaId"],
+      where: {
+        AND: [
+          scope,
+          {
+            plazaId: { in: plazaIds },
             status: { not: "COMPLETED" },
             dueDate: { lt: today },
           },
-        }),
-      ]);
+        ],
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const counts = new Map<
+    string,
+    { total: number; completed: number; blocked: number; overdue: number }
+  >();
+  for (const id of plazaIds) {
+    counts.set(id, { total: 0, completed: 0, blocked: 0, overdue: 0 });
+  }
+  for (const row of statusCounts) {
+    if (!row.plazaId) continue;
+    const entry = counts.get(row.plazaId);
+    if (!entry) continue;
+    entry.total += row._count._all;
+    if (row.status === "COMPLETED") entry.completed += row._count._all;
+    if (row.status === "BLOCKED") entry.blocked += row._count._all;
+  }
+  for (const row of overdueCounts) {
+    if (!row.plazaId) continue;
+    const entry = counts.get(row.plazaId);
+    if (entry) entry.overdue += row._count._all;
+  }
+
+  return NextResponse.json(
+    plazas.map((z) => {
+      const c = counts.get(z.id) ?? {
+        total: 0,
+        completed: 0,
+        blocked: 0,
+        overdue: 0,
+      };
       return {
-        id: plaza.id,
-        projectId: plaza.projectId,
-        project: plaza.project,
-        name: plaza.name,
-        lengthKm: plaza.lengthKm,
-        state: plaza.state,
-        piu: plaza.piu,
-        ro: plaza.ro,
-        status: plaza.status,
-        task: { total, completed, blocked, overdue },
-        progressPct: plazaProgress(completed, total),
-        createdAt: plaza.createdAt,
-        updatedAt: plaza.updatedAt,
+        id: z.id,
+        projectId: z.projectId,
+        project: z.project,
+        name: z.name,
+        state: z.state,
+        piu: z.piu,
+        ro: z.ro,
+        lengthKm: z.lengthKm,
+        active: z.active,
+        status: z.active ? "ACTIVE" : "ARCHIVED",
+        task: c,
+        progressPct: plazaProgress(c.completed, c.total),
       };
     }),
   );
-  return NextResponse.json(items);
 }
 
-/** POST /api/plazas → ADMIN + MANAGEMENT. 409 on (projectId, name) duplicate. */
-export async function POST(req: Request) {
+/** POST /api/plazas → Admin / Head Office. */
+export async function POST(req: Request): Promise<Response> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!canManage(user.role))
+  if (!canManageProjects(user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const body: unknown = await req.json().catch(() => null);
   const parsed = plazaSchema.safeParse(body);
-  if (!parsed.success)
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid input", issues: parsed.error.issues },
+      { error: "Invalid input", issues: parsed.error.flatten() },
       { status: 400 },
     );
+  }
 
   const project = await db.project.findUnique({
     where: { id: parsed.data.projectId },
+    select: { id: true },
   });
-  if (!project)
+  if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
 
-  const dup = await db.plaza.findUnique({
-    where: {
-      projectId_name: {
-        projectId: parsed.data.projectId,
-        name: parsed.data.name,
+  const created = await db.plaza.create({
+    data: {
+      projectId: parsed.data.projectId,
+      name: parsed.data.name,
+      state: parsed.data.state ?? null,
+      piu: parsed.data.piu ?? null,
+      ro: parsed.data.ro ?? null,
+      lengthKm: parsed.data.lengthKm ?? null,
+      active: parsed.data.active ?? true,
+    },
+    include: {
+      project: {
+        select: {
+          id: true,
+          name: true,
+          acronym: true,
+          company: { select: { id: true, name: true, code: true } },
+        },
       },
     },
   });
-  if (dup)
-    return NextResponse.json(
-      { error: "Plaza name already exists in this project" },
-      { status: 409 },
-    );
 
-  try {
-    const created = await db.plaza.create({
-      data: {
-        projectId: parsed.data.projectId,
-        name: parsed.data.name,
-        lengthKm: parsed.data.lengthKm,
-        state: parsed.data.state,
-        piu: parsed.data.piu,
-        ro: parsed.data.ro,
-        status: parsed.data.status ?? "ACTIVE",
-      },
-    });
-    return NextResponse.json(created, { status: 201 });
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
-      return NextResponse.json(
-        { error: "Plaza name already exists in this project" },
-        { status: 409 },
-      );
-    throw e;
-  }
+  return NextResponse.json(created, { status: 201 });
 }

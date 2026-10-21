@@ -34,7 +34,7 @@ export function useRole(): string | null | false {
 export function AppSidebar({ active }: { active: NavKey }) {
   const role = useRole();
   const items: NavKey[] = ["Dashboard", "My Tasks", "Projects"];
-  if (role === "ADMIN" || role === "MANAGEMENT") items.push("Admin");
+  if (role === "ADMIN" || role === "HEAD_OFFICE") items.push("Admin");
   return (
     <aside
       aria-label="Primary navigation"
@@ -53,7 +53,7 @@ export function AppSidebar({ active }: { active: NavKey }) {
                 : "text-white/70"
             }`}
           >
-            {item === "Dashboard" ? (role === "MANAGER" ? "My Work" : "Portfolio") : item}
+            {item === "Dashboard" ? (role === "PROJECT_MANAGER" ? "My Work" : "Portfolio") : item}
           </a>
         ))}
       </nav>

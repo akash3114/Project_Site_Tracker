@@ -7,53 +7,107 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Access level. Job title (PM / Toll / Maintenance / Corridor) lives on the
-// assignment rows, not here: one person can hold different jobs per site.
+// ---------------------------------------------------------------------------
+// People and access
+//
+// There is no fixed account role. Access is derived from assignments:
+//   - User.isAdmin                    -> platform administrator
+//   - CompanyAssignment(HEAD_OFFICE)  -> head office, all projects in company
+//   - ProjectAssignment(PROJECT_MANAGER) -> project manager
+//   - PlazaAssignment(TOLL|MAINTENANCE|CORRIDOR) -> site manager
+// A person may hold several assignments at once.
+// ---------------------------------------------------------------------------
+
 model User {
   id           String   @id @default(cuid())
   name         String
   email        String   @unique
   phone        String?
   passwordHash String
-  role         Role     @default(MANAGER)
+  isAdmin      Boolean  @default(false)
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  companyAssignments CompanyAssignment[]
   projectAssignments ProjectAssignment[]
   plazaAssignments   PlazaAssignment[]
-  assignedTasks      Task[]              @relation("Assignee")
-  createdTasks       Task[]              @relation("Creator")
-  events             TaskEvent[]
 
-  @@index([role])
+  assignedTasks  Task[] @relation("Assignee")
+  createdTasks   Task[] @relation("Creator")
+  completedTasks Task[] @relation("Completer")
+
+  activities TaskActivity[] @relation("ActivityActor")
+
+  fromAssigneeActivities TaskActivity[] @relation("ActivityFromAssignee")
+  toAssigneeActivities   TaskActivity[] @relation("ActivityToAssignee")
+
+  reopenRequested TaskReopenRequest[] @relation("ReopenRequester")
+  reopenReviewed  TaskReopenRequest[] @relation("ReopenReviewer")
+
+  attachments TaskAttachment[]
+
+  @@index([isAdmin])
   @@index([active])
 }
 
-enum Role {
-  ADMIN
-  MANAGEMENT
-  MANAGER
+model Company {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects    Project[]
+  assignments CompanyAssignment[]
+
+  @@index([active])
+}
+
+model CompanyAssignment {
+  companyId    String
+  userId       String
+  role         CompanyRole @default(HEAD_OFFICE)
+  assignedById String?
+  assignedAt   DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, userId])
+  @@index([companyId])
+  @@index([userId])
+}
+
+enum CompanyRole {
+  HEAD_OFFICE
 }
 
 model Project {
-  id        String       @id @default(cuid())
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
   name      String
   acronym   String?
   round     Round
-  status    MasterStatus @default(ACTIVE)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  state     String?
+  lengthKm  Float?
+  piu       String?
+  ro        String?
+  // Soft archive only. Projects never complete.
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   plazas      Plaza[]
   assignments ProjectAssignment[]
+  tasks       Task[]
 
-  // Canonical identity after Excel cleaning (see scripts/parse-nhit.py:
-  // AS folds into Palanpur, Amravati x3 merges). Acronym stays non-unique
-  // (AAN x3, RSB x2) and is display/search only.
-  @@unique([name, round])
+  @@unique([companyId, name])
+  @@index([companyId])
   @@index([round])
-  @@index([status])
+  @@index([active])
   @@index([acronym])
 }
 
@@ -64,34 +118,28 @@ enum Round {
   ROUND_4
 }
 
-enum MasterStatus {
-  ACTIVE
-  ON_HOLD
-  COMPLETED
-}
-
 model Plaza {
-  id        String       @id @default(cuid())
+  id        String   @id @default(cuid())
   projectId String
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
   name      String
   state     String?
   piu       String?
   ro        String?
   lengthKm  Float?
-  status    MasterStatus @default(ACTIVE)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  // Soft archive only. Plazas never complete.
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   assignments PlazaAssignment[]
   tasks       Task[]
 
   @@unique([projectId, name])
   @@index([projectId])
-  @@index([status])
+  @@index([active])
 }
 
-// Project team. Role is always PROJECT_MANAGER (one primary per project).
 model ProjectAssignment {
   projectId    String
   userId       String
@@ -107,8 +155,6 @@ model ProjectAssignment {
   @@index([userId])
 }
 
-// Plaza team + access control. PK includes role so one user can hold
-// several jobs on the same plaza. Vacant post = no row.
 model PlazaAssignment {
   plazaId      String
   userId       String
@@ -131,28 +177,54 @@ enum PlazaRole {
   CORRIDOR
 }
 
-model Task {
-  id          String     @id @default(cuid())
-  plazaId     String
-  plaza       Plaza      @relation(fields: [plazaId], references: [id], onDelete: Restrict)
-  title       String
-  description String?
-  status      TaskStatus @default(TODO)
-  priority    Priority   @default(MEDIUM)
-  assigneeId  String?
-  assignee    User?      @relation("Assignee", fields: [assigneeId], references: [id])
-  createdById String
-  createdBy   User       @relation("Creator", fields: [createdById], references: [id])
-  dueDate     DateTime?  @db.Date
-  completedAt DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  events      TaskEvent[]
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
 
+model TaskCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks Task[]
+
+  @@index([active])
+}
+
+model Task {
+  id            String        @id @default(cuid())
+  projectId     String
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  plazaId       String?
+  plaza         Plaza?        @relation(fields: [plazaId], references: [id], onDelete: Restrict)
+  categoryId    String?
+  category      TaskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  title         String
+  description   String?
+  status        TaskStatus    @default(TODO)
+  priority      Priority      @default(MEDIUM)
+  assigneeId    String?
+  assignee      User?         @relation("Assignee", fields: [assigneeId], references: [id])
+  createdById   String
+  createdBy     User          @relation("Creator", fields: [createdById], references: [id])
+  dueDate       DateTime?     @db.Date
+  completedAt   DateTime?
+  completedById String?
+  completedBy   User?         @relation("Completer", fields: [completedById], references: [id])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  activities     TaskActivity[]
+  attachments    TaskAttachment[]
+  reopenRequests TaskReopenRequest[]
+
+  @@index([projectId, status])
   @@index([plazaId, status])
   @@index([assigneeId])
+  @@index([categoryId])
   @@index([dueDate])
-  @@index([plazaId])
   @@index([status])
 }
 
@@ -167,30 +239,87 @@ enum Priority {
   LOW
   MEDIUM
   HIGH
-  CRITICAL
 }
 
-model TaskEvent {
-  id         String      @id @default(cuid())
-  taskId     String
-  task       Task        @relation(fields: [taskId], references: [id], onDelete: Restrict)
-  actorId    String
-  actor      User        @relation(fields: [actorId], references: [id])
-  type       EventType
-  fromStatus TaskStatus?
-  toStatus   TaskStatus?
-  text       String?
-  createdAt  DateTime    @default(now())
+// Immutable task history. Comments are activity rows too, so the feed and
+// the audit trail are the same append-only stream.
+model TaskActivity {
+  id             String           @id @default(cuid())
+  taskId         String
+  task           Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actorId        String
+  actor          User             @relation("ActivityActor", fields: [actorId], references: [id])
+  type           TaskActivityType
+  fromStatus     TaskStatus?
+  toStatus       TaskStatus?
+  fromAssigneeId String?
+  fromAssignee   User?            @relation("ActivityFromAssignee", fields: [fromAssigneeId], references: [id])
+  toAssigneeId   String?
+  toAssignee     User?            @relation("ActivityToAssignee", fields: [toAssigneeId], references: [id])
+  text           String?
+  createdAt      DateTime         @default(now())
+
+  attachments TaskAttachment[]
 
   @@index([taskId, createdAt])
   @@index([actorId])
+  @@index([type])
 }
 
-enum EventType {
+enum TaskActivityType {
   CREATED
-  STATUS
-  ASSIGN
   COMMENT
-  REOPEN
-  META
+  ASSIGNED
+  STATUS_CHANGED
+  REOPEN_REQUESTED
+  REOPEN_APPROVED
+  REOPEN_REJECTED
+  REOPEN_CANCELLED
+  REOPENED
+  ATTACHMENT
+  UPDATED
+}
+
+model TaskAttachment {
+  id           String        @id @default(cuid())
+  taskId       String
+  task         Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  activityId   String?
+  activity     TaskActivity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  uploadedById String
+  uploadedBy   User          @relation(fields: [uploadedById], references: [id])
+  fileName     String
+  storedName   String        @unique
+  mimeType     String
+  sizeBytes    Int
+  createdAt    DateTime      @default(now())
+
+  @@index([taskId])
+  @@index([activityId])
+}
+
+model TaskReopenRequest {
+  id            String              @id @default(cuid())
+  taskId        String
+  task          Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  requestedById String
+  requestedBy   User                @relation("ReopenRequester", fields: [requestedById], references: [id])
+  reviewedById  String?
+  reviewedBy    User?               @relation("ReopenReviewer", fields: [reviewedById], references: [id])
+  status        ReopenRequestStatus @default(PENDING)
+  reason        String
+  reviewNote    String?
+  createdAt     DateTime            @default(now())
+  reviewedAt    DateTime?
+
+  @@index([taskId, status])
+  @@index([requestedById])
+  @@index([status])
+}
+
+enum ReopenRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }

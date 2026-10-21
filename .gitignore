@@ -16,6 +16,9 @@
 # production
 /build
 
+# runtime attachment uploads (local disk)
+/uploads
+
 # misc
 .DS_Store
 *.pem
