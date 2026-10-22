@@ -142,6 +142,7 @@ export default function ProjectsPage() {
                         acronym={project.acronym}
                         state={project.state}
                         status={project.active ? "Active" : "Archived"}
+                        round={project.round}
                         plazaCount={project.plazaCount}
                         progressPct={project.progressPct}
                         openCount={project.task.total - project.task.completed}

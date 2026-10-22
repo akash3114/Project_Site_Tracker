@@ -105,9 +105,9 @@ for (const rawLine of source.split(/\r?\n/)) {
 }
 
 const companyCodes = new Map([
-  ["NHIT Eastern Projects Private Limited", "NHIT-E"],
-  ["NHIT Southern Projects Private Limited", "NHIT-S"],
-  ["NHIT Western Projects Private Limited", "NHIT-W"],
+  ["NHIT Eastern Projects Private Limited", "NEPPL"],
+  ["NHIT Southern Projects Private Limited", "NSPPL"],
+  ["NHIT Western Projects Private Limited", "NWPPL"],
 ]);
 for (const c of companies) {
   c.code = companyCodes.get(c.name) ?? c.name.replace(/[^A-Z]/g, "").slice(0, 8);

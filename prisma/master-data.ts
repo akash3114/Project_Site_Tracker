@@ -27,7 +27,7 @@ export type MasterCompany = {
 export const MASTER_COMPANIES: MasterCompany[] = [
   {
     "name": "NHIT Eastern Projects Private Limited",
-    "code": "NHIT-E",
+    "code": "NEPPL",
     "projects": [
       {
         "name": "Kachugaon-Kalijhar",
@@ -276,7 +276,7 @@ export const MASTER_COMPANIES: MasterCompany[] = [
   },
   {
     "name": "NHIT Southern Projects Private Limited",
-    "code": "NHIT-S",
+    "code": "NSPPL",
     "projects": [
       {
         "name": "Narasannapeta-Ranasthalam",
@@ -573,7 +573,7 @@ export const MASTER_COMPANIES: MasterCompany[] = [
   },
   {
     "name": "NHIT Western Projects Private Limited",
-    "code": "NHIT-W",
+    "code": "NWPPL",
     "projects": [
       {
         "name": "Abu Road-Swaroopganj",

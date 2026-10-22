@@ -14,14 +14,6 @@ type Status = "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
 type RoundKey = "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4";
 type StatusCounts = Record<Status, number>;
 
-type CompanySummary = {
-  id: string;
-  name: string;
-  code?: string | null;
-  projectCount: number;
-  taskCounts: StatusCounts;
-};
-
 type Snapshot = {
   projectCount: number;
   plazaCount: number;
@@ -29,7 +21,6 @@ type Snapshot = {
   kpis: { open: number; overdue: number; blocked: number; completedWeek: number };
   statusCounts: StatusCounts;
   rounds: { round: RoundKey; projectCount: number; taskCounts: StatusCounts }[];
-  companies: CompanySummary[];
 };
 
 type PlazaSummary = {
@@ -316,59 +307,6 @@ function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
   );
 }
 
-function CompaniesPanel({ companies }: { companies: CompanySummary[] }) {
-  if (companies.length === 0) return null;
-  return (
-    <section className="cockpit-panel mb-3" aria-labelledby="companies-title">
-      <div className="cockpit-panel-head">
-        <div>
-          <h2 id="companies-title">Companies</h2>
-          <span>{companies.length} {companies.length === 1 ? "company" : "companies"} · projects and task load</span>
-        </div>
-      </div>
-      <div
-        className="cockpit-project-columns"
-        role="table"
-        aria-label="Companies with project and task counts"
-        aria-rowcount={companies.length + 1}
-        aria-colcount={4}
-      >
-        <div className="cockpit-project-head" role="row">
-          <span role="columnheader">Company</span>
-          <span role="columnheader">Projects</span>
-          <span role="columnheader">Open</span>
-          <span role="columnheader">Completed</span>
-        </div>
-        <div role="rowgroup">
-          {companies.map((company) => {
-            const total = Object.values(company.taskCounts).reduce((sum, value) => sum + value, 0);
-            const open = total - company.taskCounts.COMPLETED;
-            return (
-              <div
-                className="cockpit-project-row"
-                key={company.id}
-                role="row"
-                aria-label={`${company.name}: ${company.projectCount} projects, ${open} open tasks, ${company.taskCounts.COMPLETED} completed`}
-              >
-                <span className="project-title-cell" role="cell">
-                  <span className="project-acronym-tag">{company.code?.trim() || "—"}</span>
-                  <span className="project-title-wrap">
-                    <strong title={company.name}>{company.name}</strong>
-                    <small>{total} tasks · {company.taskCounts.BLOCKED} blocked</small>
-                  </span>
-                </span>
-                <span className="project-count" role="cell">{company.projectCount}</span>
-                <span className={`project-count ${open > 0 ? "" : "zero"}`} role="cell">{open}</span>
-                <span className="project-count" role="cell">{company.taskCounts.COMPLETED}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function formatTaskProject(task: DashboardTask) {
   return task.project?.name ?? task.plaza?.project?.name ?? "Project";
 }
@@ -466,8 +404,6 @@ function ManagementDashboard() {
               <StatusLegend />
             </div>
           </section>
-
-          <CompaniesPanel companies={snapshot.companies ?? []} />
 
           <section className="cockpit-main-grid">
             <ProjectRegister projects={projects} />

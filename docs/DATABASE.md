@@ -42,7 +42,7 @@ erDiagram
     companies {
         string id PK
         string name UK
-        string code UK "NHIT-E / NHIT-S / NHIT-W"
+        string code UK "NEPPL / NSPPL / NWPPL"
         boolean active
     }
     projects {
@@ -324,7 +324,10 @@ docs/master-data.md
 
 Fresh seed profile (`SEED_RESET=1` wipes in FK-safe order first):
 
-* **3 companies**: `NHIT-E`, `NHIT-S`, `NHIT-W`.
+* **3 companies**: `NEPPL` (NHIT Eastern Projects Private Limited),
+  `NSPPL` (NHIT Southern Projects Private Limited),
+  `NWPPL` (NHIT Western Projects Private Limited). The short code is derived
+  in `scripts/parse-master-data.mjs` and stored on `Company.code`.
 * **28 projects**, **46 plazas** (plaza lengths come from the bracket values in
   the master data; project `lengthKm`/`piu`/`ro` stay blank because plaza
   brackets are authoritative).
