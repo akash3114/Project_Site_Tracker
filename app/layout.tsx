@@ -1,24 +1,26 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const display = Inter_Tight({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+// Self-hosted latin variable fonts (app/fonts/) so `next build` never needs
+// network access to Google Fonts — required for offline Docker builds.
+const display = localFont({
+  src: "./fonts/inter-tight-latin-wght.woff2",
+  weight: "100 900",
   variable: "--font-display",
   display: "swap",
 });
 
-const body = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const body = localFont({
+  src: "./fonts/inter-latin-wght.woff2",
+  weight: "100 900",
   variable: "--font-body",
   display: "swap",
 });
 
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const mono = localFont({
+  src: "./fonts/jetbrains-mono-latin-wght.woff2",
+  weight: "100 800",
   variable: "--font-mono",
   display: "swap",
 });
