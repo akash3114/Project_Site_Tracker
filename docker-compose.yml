@@ -1,0 +1,85 @@
+# Internal deployment: Postgres + Next.js (no reverse proxy).
+# Build context is the repo root so the existing multi-stage docker/Dockerfile
+# (deps -> builder -> tools / standalone runner) is reused as-is.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracker}
+      POSTGRES_DB: ${POSTGRES_DB:-tracker}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tracker} -d ${POSTGRES_DB:-tracker}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Deliberately no published port: the DB is only reachable from the app
+    # on the internal compose network. Temporarily uncomment to inspect:
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+
+  # One-shot: applies Prisma migrations, then exits. Re-runs on every `up`.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: tools
+    container_name: tracker-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tracker}:${POSTGRES_PASSWORD:-tracker}@db:5432/${POSTGRES_DB:-tracker}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-change-me}
+    command: npx prisma migrate deploy
+
+  # One-shot: idempotent seed (upserts master data + users), then exits.
+  # Set SEED_RESET=1 in .env to wipe and re-seed (destructive).
+  seed:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: tools
+    container_name: tracker-seed
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tracker}:${POSTGRES_PASSWORD:-tracker}@db:5432/${POSTGRES_DB:-tracker}?schema=public
+      SEED_RESET: ${SEED_RESET:-}
+      SEED_MANAGEMENT_EMAIL: ${SEED_MANAGEMENT_EMAIL:-management@tracker.local}
+      SEED_MANAGEMENT_PASSWORD: ${SEED_MANAGEMENT_PASSWORD:-Manage@123}
+
+    command: npm run seed
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: tracker-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tracker}:${POSTGRES_PASSWORD:-tracker}@db:5432/${POSTGRES_DB:-tracker}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-change-me}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  pgdata:
