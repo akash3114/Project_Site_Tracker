@@ -10,6 +10,11 @@ import type { SessionUser } from "@/lib/access";
  * project, otherwise the plaza job titles assigned to them.
  */
 export async function badgeTitle(user: SessionUser): Promise<string> {
+  if (user.role === "HEAD_OFFICE") {
+    return user.departmentName
+      ? `${ROLE_LABELS.HEAD_OFFICE} · ${user.departmentName}`
+      : ROLE_LABELS.HEAD_OFFICE;
+  }
   if (user.role !== "PROJECT_MANAGER") return ROLE_LABELS[user.role];
 
   const [projectCount, plazaAssignments] = await Promise.all([

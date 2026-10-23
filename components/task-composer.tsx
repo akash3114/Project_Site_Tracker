@@ -6,6 +6,87 @@ import type { AssigneeOption, CategoryOption } from "@/components/task-filters";
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
 
+type CandidateRole =
+  | "ADMIN"
+  | "HEAD_OFFICE"
+  | "PROJECT_MANAGER"
+  | "SITE_MANAGER";
+
+/** Shape returned by GET /api/assignees. */
+type AssigneeCandidate = {
+  id: string;
+  name: string;
+  role?: CandidateRole | null;
+  department?: string | null;
+  office?: string | null;
+};
+
+type AssigneeGroup = {
+  key: string;
+  label: string;
+  rows: AssigneeCandidate[];
+};
+
+const HEAD_OFFICE_FALLBACK = "Head Office";
+
+/**
+ * Group candidates for the assignee picker: Administrators, one group per Head Office
+ * department (alphabetical), then Project managers and Site managers. Empty
+ * groups are dropped. Rows without a known role (the derived fallback list)
+ * keep a trailing group so options are never silently lost.
+ */
+function groupAssignees(rows: AssigneeCandidate[]): AssigneeGroup[] {
+  const admin: AssigneeCandidate[] = [];
+  const headOffice = new Map<string, AssigneeCandidate[]>();
+  const projectManagers: AssigneeCandidate[] = [];
+  const siteManagers: AssigneeCandidate[] = [];
+  const other: AssigneeCandidate[] = [];
+
+  for (const row of rows) {
+    if (row.role === "ADMIN") {
+      admin.push(row);
+    } else if (row.role === "HEAD_OFFICE") {
+      const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
+      const bucket = headOffice.get(department);
+      if (bucket) bucket.push(row);
+      else headOffice.set(department, [row]);
+    } else if (row.role === "PROJECT_MANAGER") {
+      projectManagers.push(row);
+    } else if (row.role === "SITE_MANAGER") {
+      siteManagers.push(row);
+    } else {
+      other.push(row);
+    }
+  }
+
+  const groups: AssigneeGroup[] = [
+    { key: "admin", label: "Administrators", rows: admin },
+    ...Array.from(headOffice.keys())
+      .sort((a, b) => a.localeCompare(b))
+      .map((department) => ({
+        key: `head-office:${department}`,
+        label: department,
+        rows: headOffice.get(department) ?? [],
+      })),
+    {
+      key: "project-managers",
+      label: "Project managers",
+      rows: projectManagers,
+    },
+    { key: "site-managers", label: "Site managers", rows: siteManagers },
+    { key: "other", label: "Other assignees", rows: other },
+  ];
+
+  return groups.filter((group) => group.rows.length > 0);
+}
+
+/** Native options are one line; HO department rides along as a tooltip. */
+function candidateTitle(row: AssigneeCandidate): string | undefined {
+  if (row.role !== "HEAD_OFFICE") return undefined;
+  const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
+  return `${row.name} · ${department}`;
+}
+
 type PlazaOption = {
   id: string;
   name: string;
@@ -68,7 +149,7 @@ function parseScope(
 }
 
 /** Assignees already visible on tasks in the selected scope. */
-function deriveAssignees(scope: Scope, tasks: OwnerSource[]): AssigneeOption[] {
+function deriveAssignees(scope: Scope, tasks: OwnerSource[]): AssigneeCandidate[] {
   const seen = new Map<string, string>();
   for (const task of tasks) {
     if (!task.assignee?.id || !task.assignee.name) continue;
@@ -145,12 +226,12 @@ export function TaskComposer({
   const [categoryId, setCategoryId] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
-  const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
+  const [assigneeOptions, setAssigneeOptions] = useState<AssigneeCandidate[]>([]);
   const [fetchedCategories, setFetchedCategories] =
     useState<CategoryOption[]>(EMPTY_CATEGORIES);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState<{ tone: "error" | "ok"; text: string } | null>(null);
-  const ownerCache = useRef(new Map<string, AssigneeOption[]>());
+  const ownerCache = useRef(new Map<string, AssigneeCandidate[]>());
 
   const scope = useMemo<Scope | null>(() => {
     const parsed = parseScope(scopeValue, projects, plazaOptions);
@@ -205,6 +286,11 @@ export function TaskComposer({
     [resolvedCategories, fetchedCategories],
   );
 
+  const assigneeGroups = useMemo(
+    () => groupAssignees(assigneeOptions),
+    [assigneeOptions],
+  );
+
   useEffect(() => {
     if (!scopeKind) {
       setAssigneeOptions([]);
@@ -226,18 +312,23 @@ export function TaskComposer({
 
     let cancelled = false;
     void (async () => {
-      let list: AssigneeOption[] | null = null;
+      let list: AssigneeCandidate[] | null = null;
       if (current.projectId) {
         try {
           const params = new URLSearchParams({ projectId: current.projectId });
           if (current.kind === "plaza") params.set("plazaId", current.plazaId);
-          const data = await fetchJson<{ id: string; name: string }[]>(
+          const data = await fetchJson<AssigneeCandidate[]>(
             `/api/assignees?${params.toString()}`,
           );
-          list = (Array.isArray(data) ? data : []).map(({ id, name }) => ({
-            id,
-            name,
-          }));
+          list = (Array.isArray(data) ? data : []).map(
+            ({ id, name, role, department, office }) => ({
+              id,
+              name,
+              role,
+              department,
+              office,
+            }),
+          );
         } catch {
           list = null;
         }
@@ -417,10 +508,18 @@ export function TaskComposer({
           onChange={(event) => setAssigneeId(event.target.value)}
         >
           <option value="">Assignee</option>
-          {assigneeOptions.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
+          {assigneeGroups.map((group) => (
+            <optgroup key={group.key} label={group.label}>
+              {group.rows.map((row) => (
+                <option
+                  key={row.id}
+                  value={row.id}
+                  title={candidateTitle(row)}
+                >
+                  {row.name}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
         <button

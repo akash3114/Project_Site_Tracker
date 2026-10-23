@@ -12,16 +12,31 @@ type UserItem = {
   role: string;
   isAdmin: boolean;
   active: boolean;
-  companyIds: string[];
+  officeName: string | null;
   projectIds: string[];
 };
 
-type CompanyItem = {
+type DepartmentItem = {
   id: string;
   name: string;
   code: string;
+  sortOrder: number;
   active: boolean;
-  projectCount: number;
+  memberCount: number;
+};
+
+type MembershipItem = {
+  userId: string;
+  departmentId: string;
+  isPrimary: boolean;
+  assignedAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    office: { name: string } | null;
+  };
+  department: { id: string; name: string; code: string; sortOrder: number };
 };
 
 type ProjectItem = {
@@ -49,6 +64,8 @@ type PlazaItem = {
 /** Selected plaza scope: one or more job titles plus a primary flag. */
 type PlazaPick = { roles: PlazaRole[]; isPrimary: boolean };
 
+type FetchResult<T> = { data: T | null; error: string | null };
+
 async function readError(res: Response): Promise<string> {
   try {
     const j = (await res.json()) as { error?: string };
@@ -58,22 +75,36 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
+/** Fetch JSON without throwing: non-2xx and network failures become `error`. */
+async function fetchJson<T>(url: string): Promise<FetchResult<T>> {
+  try {
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (!res.ok) return { data: null, error: await readError(res) };
+    return { data: (await res.json()) as T, error: null };
+  } catch {
+    return { data: null, error: "Network error — check the connection and retry" };
+  }
+}
+
 /** "Toll Manager" → "Toll" so three title toggles fit on one row. */
 function shortRoleLabel(role: PlazaRole): string {
   return PLAZA_ROLE_LABELS[role].replace(" Manager", "");
 }
 
+const smallBtnCls =
+  "inline-flex min-h-[36px] items-center rounded-[8px] border border-[rgba(23,34,44,0.12)] px-3 text-xs font-medium text-[#1C2824] disabled:cursor-not-allowed disabled:opacity-40";
+
 /**
- * Admin/Head Office team console: company Head Office, project managers and
- * plaza job titles. A person can hold any combination of the three scopes.
+ * Admin/Head Office team console: Head Office departments, project managers
+ * and plaza job titles. A person can hold any combination of the three scopes.
  */
 export function AccessManager() {
   const [users, setUsers] = useState<UserItem[]>([]);
-  const [companies, setCompanies] = useState<CompanyItem[]>([]);
+  const [departments, setDepartments] = useState<DepartmentItem[]>([]);
+  const [memberships, setMemberships] = useState<MembershipItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [plazas, setPlazas] = useState<PlazaItem[]>([]);
   const [selected, setSelected] = useState("");
-  const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [projectPicks, setProjectPicks] = useState<
     Record<string, { isPrimary: boolean }>
   >({});
@@ -83,86 +114,107 @@ export function AccessManager() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
+  const [memberNotice, setMemberNotice] = useState<string | null>(null);
+  const [memberBusy, setMemberBusy] = useState<string | null>(null);
+  const [addDepartmentId, setAddDepartmentId] = useState("");
 
   const loadBase = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    try {
-      const [ur, cr, pr, zr] = await Promise.all([
-        fetch("/api/users", { credentials: "same-origin" }),
-        fetch("/api/companies", { credentials: "same-origin" }),
-        fetch("/api/projects", { credentials: "same-origin" }),
-        fetch("/api/plazas", { credentials: "same-origin" }),
-      ]);
-      if (!ur.ok) throw new Error(await readError(ur));
-      if (!cr.ok) throw new Error(await readError(cr));
-      if (!pr.ok) throw new Error(await readError(pr));
-      if (!zr.ok) throw new Error(await readError(zr));
+    setLoadError(null);
 
-      const u = (await ur.json()) as UserItem[];
-      setUsers(u);
-      setCompanies((await cr.json()) as CompanyItem[]);
-      setProjects((await pr.json()) as ProjectItem[]);
-      setPlazas((await zr.json()) as PlazaItem[]);
-      setSelected((prev) => prev || u.find((row) => row.active)?.id || u[0]?.id || "");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load access console");
-    } finally {
-      setLoading(false);
+    const [u, p, z, d, m] = await Promise.all([
+      fetchJson<UserItem[]>("/api/users"),
+      fetchJson<ProjectItem[]>("/api/projects"),
+      fetchJson<PlazaItem[]>("/api/plazas"),
+      fetchJson<DepartmentItem[]>("/api/departments"),
+      fetchJson<{ memberships: MembershipItem[] }>(
+        "/api/head-office-memberships",
+      ),
+    ]);
+
+    const errors: string[] = [];
+    if (u.data) {
+      const list = u.data;
+      setUsers(list);
+      setSelected(
+        (prev) => prev || list.find((row) => row.active)?.id || list[0]?.id || "",
+      );
+    } else if (u.error) {
+      errors.push(u.error);
     }
+    if (p.data) setProjects(p.data);
+    else if (p.error) errors.push(p.error);
+    if (z.data) setPlazas(z.data);
+    else if (z.error) errors.push(z.error);
+    if (d.data) setDepartments(d.data);
+    else if (d.error) errors.push(d.error);
+    if (m.data) setMemberships(m.data.memberships);
+    else if (m.error) errors.push(m.error);
+
+    setLoadError(errors.length ? errors.join(" · ") : null);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
     void loadBase();
   }, [loadBase]);
 
+  /** Re-read the roster, catalogue and memberships after a membership change. */
+  const refreshRoster = useCallback(async (): Promise<string | null> => {
+    const [u, d, m] = await Promise.all([
+      fetchJson<UserItem[]>("/api/users"),
+      fetchJson<DepartmentItem[]>("/api/departments"),
+      fetchJson<{ memberships: MembershipItem[] }>(
+        "/api/head-office-memberships",
+      ),
+    ]);
+
+    const errors: string[] = [];
+    if (u.data) setUsers(u.data);
+    else if (u.error) errors.push(u.error);
+    if (d.data) setDepartments(d.data);
+    else if (d.error) errors.push(d.error);
+    if (m.data) setMemberships(m.data.memberships);
+    else if (m.error) errors.push(m.error);
+    return errors.length ? errors.join(" · ") : null;
+  }, []);
+
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
     setAssignmentsLoading(true);
-    setError(null);
-    setNotice(null);
-    setCompanyIds([]);
+    setAccessError(null);
+    setMemberError(null);
+    setMemberNotice(null);
+    setAddDepartmentId("");
     setProjectPicks({});
     setPlazaPicks({});
     setDirty(false);
 
     void (async () => {
-      try {
-        const [ar, cr, pr] = await Promise.all([
-          fetch(`/api/access?userId=${selected}`, {
-            credentials: "same-origin",
-          }),
-          fetch(`/api/company-assignments?userId=${selected}`, {
-            credentials: "same-origin",
-          }),
-          fetch(`/api/project-assignments?userId=${selected}`, {
-            credentials: "same-origin",
-          }),
-        ]);
-        if (!ar.ok) throw new Error(await readError(ar));
-        if (!cr.ok) throw new Error(await readError(cr));
-        if (!pr.ok) throw new Error(await readError(pr));
-
-        const access = (await ar.json()) as {
-          assignments: {
-            plazaId: string;
-            role: PlazaRole;
-            isPrimary: boolean;
-          }[];
-        };
-        const company = (await cr.json()) as {
-          assignments: { companyId: string }[];
-        };
-        const project = (await pr.json()) as {
+      const [a, p] = await Promise.all([
+        fetchJson<{
+          assignments: { plazaId: string; role: PlazaRole; isPrimary: boolean }[];
+        }>(`/api/access?userId=${selected}`),
+        fetchJson<{
           assignments: { projectId: string; isPrimary: boolean }[];
-        };
-        if (cancelled) return;
+        }>(`/api/project-assignments?userId=${selected}`),
+      ]);
+      if (cancelled) return;
 
+      const errors: string[] = [];
+      if (a.error) errors.push(a.error);
+      if (p.error) errors.push(p.error);
+      setAccessError(errors.length ? errors.join(" · ") : null);
+
+      if (a.data) {
         const nextPlazas: Record<string, PlazaPick> = {};
-        for (const row of access.assignments) {
+        for (const row of a.data.assignments) {
           const pick = nextPlazas[row.plazaId] ?? {
             roles: [],
             isPrimary: false,
@@ -173,26 +225,22 @@ export function AccessManager() {
         }
         for (const pick of Object.values(nextPlazas)) {
           pick.roles.sort(
-            (a, b) =>
-              PLAZA_ROLE_OPTIONS.indexOf(a) - PLAZA_ROLE_OPTIONS.indexOf(b),
+            (x, y) =>
+              PLAZA_ROLE_OPTIONS.indexOf(x) - PLAZA_ROLE_OPTIONS.indexOf(y),
           );
         }
+        setPlazaPicks(nextPlazas);
+      }
 
+      if (p.data) {
         const nextProjects: Record<string, { isPrimary: boolean }> = {};
-        for (const row of project.assignments) {
+        for (const row of p.data.assignments) {
           nextProjects[row.projectId] = { isPrimary: row.isPrimary };
         }
-
-        setPlazaPicks(nextPlazas);
         setProjectPicks(nextProjects);
-        setCompanyIds(company.assignments.map((row) => row.companyId));
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load access");
-        }
-      } finally {
-        if (!cancelled) setAssignmentsLoading(false);
       }
+
+      setAssignmentsLoading(false);
     })();
 
     return () => {
@@ -203,6 +251,42 @@ export function AccessManager() {
   const selectedUser = useMemo(
     () => users.find((u) => u.id === selected) ?? null,
     [users, selected],
+  );
+
+  /** The selected person's department memberships, primary first. */
+  const selectedMemberships = useMemo(
+    () =>
+      memberships
+        .filter((m) => m.userId === selected)
+        .sort(
+          (a, b) =>
+            Number(b.isPrimary) - Number(a.isPrimary) ||
+            a.department.sortOrder - b.department.sortOrder,
+        ),
+    [memberships, selected],
+  );
+
+  const heldDepartmentIds = useMemo(
+    () => new Set(selectedMemberships.map((m) => m.departmentId)),
+    [selectedMemberships],
+  );
+
+  const availableDepartments = useMemo(
+    () =>
+      departments.filter((d) => d.active && !heldDepartmentIds.has(d.id)),
+    [departments, heldDepartmentIds],
+  );
+
+  /** Department catalogue plus the names of everyone holding each department. */
+  const overview = useMemo(
+    () =>
+      departments.map((department) => ({
+        ...department,
+        members: memberships
+          .filter((m) => m.departmentId === department.id)
+          .sort((a, b) => a.user.name.localeCompare(b.user.name)),
+      })),
+    [departments, memberships],
   );
 
   const grouped = useMemo(() => {
@@ -233,13 +317,6 @@ export function AccessManager() {
       ),
     [plazaPicks],
   );
-
-  function toggleCompany(id: string) {
-    setDirty(true);
-    setCompanyIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  }
 
   function toggleProject(id: string) {
     setDirty(true);
@@ -302,44 +379,101 @@ export function AccessManager() {
     });
   }
 
+  /**
+   * Run one membership change immediately, then refresh the roster and
+   * memberships. API errors are shown inline, never thrown.
+   */
+  async function mutateMembership(
+    key: string,
+    method: "POST" | "PUT" | "DELETE",
+    url: string,
+    body: unknown,
+    successMessage: string,
+  ): Promise<boolean> {
+    setMemberBusy(key);
+    setMemberError(null);
+    setMemberNotice(null);
+    try {
+      const res = await fetch(url, {
+        method,
+        credentials: "same-origin",
+        ...(body === undefined
+          ? {}
+          : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }),
+      });
+      if (!res.ok) {
+        setMemberError(await readError(res));
+        return false;
+      }
+      const refreshError = await refreshRoster();
+      if (refreshError) {
+        setMemberError(`Saved, but refreshing the panel failed: ${refreshError}`);
+        return true;
+      }
+      setMemberNotice(successMessage);
+      return true;
+    } catch {
+      setMemberError("Network error — no change was saved");
+      return false;
+    } finally {
+      setMemberBusy(null);
+    }
+  }
+
+  function addMembership() {
+    if (!selected || !addDepartmentId) return;
+    const isPrimary = selectedMemberships.length === 0;
+    void mutateMembership(
+      "add",
+      "POST",
+      "/api/head-office-memberships",
+      { userId: selected, departmentId: addDepartmentId, isPrimary },
+      isPrimary
+        ? "Department added as the primary department"
+        : "Department added",
+    ).then((ok) => {
+      if (ok) setAddDepartmentId("");
+    });
+  }
+
+  function makePrimary(membership: MembershipItem) {
+    void mutateMembership(
+      `primary:${membership.departmentId}`,
+      "PUT",
+      "/api/head-office-memberships",
+      {
+        userId: membership.userId,
+        departmentId: membership.departmentId,
+        isPrimary: true,
+      },
+      `${membership.department.name} is now the primary department`,
+    );
+  }
+
+  function removeMembership(membership: MembershipItem) {
+    const params = new URLSearchParams({
+      userId: membership.userId,
+      departmentId: membership.departmentId,
+    });
+    void mutateMembership(
+      `remove:${membership.departmentId}`,
+      "DELETE",
+      `/api/head-office-memberships?${params.toString()}`,
+      undefined,
+      `${membership.department.name} removed`,
+    );
+  }
+
   async function save() {
     if (!selected || assignmentsLoading) return;
     setSaving(true);
-    setError(null);
+    setSaveError(null);
     setNotice(null);
     try {
-      // 1. Company Head Office: add/remove the company assignments.
-      const companyRes = await fetch(
-        `/api/company-assignments?userId=${selected}`,
-        { credentials: "same-origin" },
-      );
-      if (!companyRes.ok) throw new Error(await readError(companyRes));
-      const currentCompanies = new Set(
-        ((await companyRes.json()) as {
-          assignments: { companyId: string }[];
-        }).assignments.map((row) => row.companyId),
-      );
-      const wantedCompanies = new Set(companyIds);
-      for (const companyId of Array.from(wantedCompanies)) {
-        if (currentCompanies.has(companyId)) continue;
-        const res = await fetch("/api/company-assignments", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ companyId, userId: selected }),
-        });
-        if (!res.ok) throw new Error(await readError(res));
-      }
-      for (const companyId of Array.from(currentCompanies)) {
-        if (wantedCompanies.has(companyId)) continue;
-        const res = await fetch(
-          `/api/company-assignments?companyId=${companyId}&userId=${selected}`,
-          { method: "DELETE", credentials: "same-origin" },
-        );
-        if (!res.ok) throw new Error(await readError(res));
-      }
-
-      // 2. Project Manager: add/remove and keep primary flags in sync.
+      // 1. Project Manager: add/remove and keep primary flags in sync.
       const projectRes = await fetch(
         `/api/project-assignments?userId=${selected}`,
         { credentials: "same-origin" },
@@ -374,7 +508,7 @@ export function AccessManager() {
         if (!res.ok) throw new Error(await readError(res));
       }
 
-      // 3. Plaza job titles: PUT replaces the user's full plaza assignment set.
+      // 2. Plaza job titles: PUT replaces the user's full plaza assignment set.
       const assignments = Object.entries(plazaPicks).flatMap(
         ([plazaId, pick]) =>
           pick.roles.map((role) => ({
@@ -393,14 +527,12 @@ export function AccessManager() {
 
       setDirty(false);
       setNotice(
-        `Saved ${wantedCompanies.size} company, ${
-          Object.keys(projectPicks).length
-        } project and ${assignments.length} plaza role assignment${
-          assignments.length === 1 ? "" : "s"
-        }.`,
+        `Saved ${Object.keys(projectPicks).length} project and ${
+          assignments.length
+        } plaza role assignment${assignments.length === 1 ? "" : "s"}.`,
       );
     } catch (e) {
-      setError(
+      setSaveError(
         `${e instanceof Error ? e.message : "Save failed"} — some changes may already have been saved; reload the user if unsure.`,
       );
     } finally {
@@ -413,9 +545,9 @@ export function AccessManager() {
   if (users.length === 0) {
     return (
       <div className="flex flex-col gap-2">
-        {error ? (
+        {loadError ? (
           <p role="alert" className="text-sm text-[#8F2824]">
-            {error}
+            {loadError}
           </p>
         ) : null}
         <p className="text-sm text-[#586760]">
@@ -425,11 +557,17 @@ export function AccessManager() {
     );
   }
 
+  const bannerError = [loadError, accessError, saveError]
+    .filter(Boolean)
+    .join(" · ");
+
+  const busy = memberBusy !== null;
+
   return (
     <div className="flex flex-col gap-4">
-      {error ? (
+      {bannerError ? (
         <p role="alert" className="text-sm text-[#8F2824]">
-          {error}
+          {bannerError}
         </p>
       ) : null}
       {notice ? <p className="text-sm text-[#385A2B]">{notice}</p> : null}
@@ -457,9 +595,11 @@ export function AccessManager() {
             {roleLabel(selectedUser.role)}
           </span>
           <span className="font-mono text-xs text-[#586760]">
-            {companyIds.length} company · {Object.keys(projectPicks).length}{" "}
-            project · {plazaRoleCount} plaza role
-            {plazaRoleCount === 1 ? "" : "s"}
+            {selectedMemberships.length} department
+            {selectedMemberships.length === 1 ? "" : "s"} ·{" "}
+            {Object.keys(projectPicks).length} project · {plazaRoleCount} plaza
+            role{plazaRoleCount === 1 ? "" : "s"}
+            {selectedUser.officeName ? ` · ${selectedUser.officeName}` : ""}
           </span>
           {dirty ? (
             <span className="ml-auto font-mono text-[11px] uppercase tracking-wide text-[#704900]">
@@ -471,9 +611,9 @@ export function AccessManager() {
 
       {selectedUser?.isAdmin ? (
         <p className="rounded-[8px] border border-[#CDD6CE] bg-white px-3 py-2 text-xs text-[#586760]">
-          This account is a platform Admin and can already see every company.
-          The scopes below are optional and mainly useful for derived labels and
-          on-site assignments.
+          This account is a platform Admin and can already see every project and
+          plaza. The scopes below are optional and mainly useful for derived
+          labels and on-site assignments.
         </p>
       ) : null}
 
@@ -483,41 +623,152 @@ export function AccessManager() {
         <>
           <fieldset className="rounded-[12px] border border-[#CDD6CE] bg-white p-4">
             <legend className="px-1 text-sm font-semibold text-[#1C2824]">
-              Head Office ({companyIds.length} of {companies.length} companies)
+              Head Office departments ({selectedMemberships.length}
+              {departments.length ? ` of ${departments.length}` : ""})
             </legend>
             <p className="mb-3 text-xs text-[#586760]">
-              Adding any company makes this person Head Office. Head Office sees
-              every company, project and plaza in the portfolio, so the specific
-              companies below mark their home companies rather than limiting
-              visibility.
+              Head Office is an internal department membership. Holding any
+              department grants portfolio-wide visibility; the primary
+              department is the one shown in the header badge. Departments do
+              not restrict approvals. Changes here apply immediately — the
+              button below saves the project and plaza scopes only.
             </p>
-            <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
-              {companies.map((company) => (
-                <label
-                  key={company.id}
-                  className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[8px] px-2 py-1 hover:bg-[#FAFBFC]"
-                >
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 accent-[#173B33]"
-                    checked={companyIds.includes(company.id)}
-                    onChange={() => toggleCompany(company.id)}
-                  />
-                  <span className="text-sm text-[#1C2824]">
-                    <span className="font-mono text-xs text-[#586760]">
-                      {company.code}
-                    </span>{" "}
-                    {company.name}{" "}
-                    <span className="text-xs text-[#66756D]">
-                      · {company.projectCount} project
-                      {company.projectCount === 1 ? "" : "s"}
-                      {company.active ? "" : " · archived"}
+
+            {selectedMemberships.length === 0 ? (
+              <p className="mb-3 rounded-[8px] border border-[#E4EAE4] bg-[#FAFBFC] px-3 py-2 text-xs text-[#586760]">
+                No Head Office department yet. Adding one makes this person Head
+                Office.
+              </p>
+            ) : (
+              <ul className="mb-3 flex flex-col gap-2">
+                {selectedMemberships.map((membership) => (
+                  <li
+                    key={membership.departmentId}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[8px] border border-[#E4EAE4] px-3 py-2"
+                  >
+                    <span className="font-mono text-[11px] uppercase tracking-wide text-[#66756D]">
+                      {membership.department.code}
                     </span>
-                  </span>
-                </label>
-              ))}
+                    <span className="text-sm text-[#1C2824]">
+                      {membership.department.name}
+                    </span>
+                    {membership.isPrimary ? (
+                      <span className="rounded bg-[#E8F0DD] px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wide text-[#385A2B]">
+                        Primary
+                      </span>
+                    ) : null}
+                    <span className="text-xs text-[#66756D]">
+                      Office: {membership.user.office?.name ?? "—"}
+                    </span>
+                    <span className="ml-auto flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busy || membership.isPrimary}
+                        onClick={() => makePrimary(membership)}
+                        className={smallBtnCls}
+                      >
+                        {memberBusy === `primary:${membership.departmentId}`
+                          ? "Saving…"
+                          : "Make primary"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => removeMembership(membership)}
+                        className={smallBtnCls}
+                      >
+                        {memberBusy === `remove:${membership.departmentId}`
+                          ? "Removing…"
+                          : "Remove"}
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {memberError ? (
+              <p role="alert" className="mb-2 text-xs text-[#8F2824]">
+                {memberError}
+              </p>
+            ) : null}
+            {memberNotice ? (
+              <p className="mb-2 text-xs text-[#385A2B]">{memberNotice}</p>
+            ) : null}
+
+            <div className="flex flex-wrap items-end gap-2 border-t border-[#E4EAE4] pt-3">
+              <label className="flex min-w-[240px] flex-1 flex-col gap-1 text-xs font-medium text-[#1C2824]">
+                Add department
+                <select
+                  className="min-h-[44px] w-full rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm"
+                  value={addDepartmentId}
+                  onChange={(e) => setAddDepartmentId(e.target.value)}
+                  disabled={busy || availableDepartments.length === 0}
+                >
+                  <option value="">
+                    {availableDepartments.length === 0
+                      ? "All departments already held"
+                      : "Choose a department…"}
+                  </option>
+                  {availableDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.code} — {department.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={addMembership}
+                disabled={busy || !addDepartmentId}
+                className="inline-flex min-h-[44px] items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {memberBusy === "add" ? "Adding…" : "Add"}
+              </button>
             </div>
           </fieldset>
+
+          <details
+            className="rounded-[12px] border border-[#CDD6CE] bg-white p-4"
+            open
+          >
+            <summary className="cursor-pointer text-sm font-semibold text-[#1C2824]">
+              Department overview · {departments.length} department
+              {departments.length === 1 ? "" : "s"} · {memberships.length} Head
+              Office member{memberships.length === 1 ? "" : "s"}
+            </summary>
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+              {overview.map((department) => (
+                <div
+                  key={department.id}
+                  className="rounded-[8px] border border-[#E4EAE4] px-3 py-2"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm text-[#1C2824]">
+                      <span className="mr-1.5 font-mono text-[11px] text-[#66756D]">
+                        {department.code}
+                      </span>
+                      {department.name}
+                      {department.active ? null : (
+                        <span className="ml-1.5 text-[11px] text-[#66756D]">
+                          (inactive)
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 font-mono text-[11px] text-[#586760]">
+                      {department.memberCount} member
+                      {department.memberCount === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[#586760]">
+                    {department.members.length
+                      ? department.members.map((m) => m.user.name).join(", ")
+                      : "No members"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </details>
 
           <fieldset className="rounded-[12px] border border-[#CDD6CE] bg-white p-4">
             <legend className="px-1 text-sm font-semibold text-[#1C2824]">

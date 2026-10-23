@@ -180,12 +180,131 @@ async function main() {
     String((hoProjects.data?.items ?? hoProjects.data ?? []).length),
   );
 
+  // --- Departments and Head Office memberships --------------------------
+  const departmentList = await api(admin, "GET", "/api/departments");
+  const departmentRows = Array.isArray(departmentList.data) ? departmentList.data : [];
+  const sortedByOrder = departmentRows.every(
+    (row, i) => i === 0 || departmentRows[i - 1].sortOrder <= row.sortOrder,
+  );
+  const memberTotal = departmentRows.reduce(
+    (sum, row) => sum + (typeof row.memberCount === "number" ? row.memberCount : 0),
+    0,
+  );
+  check(
+    "departments endpoint returns 18 rows in sortOrder with member counts",
+    departmentList.status === 200 &&
+      departmentRows.length === 18 &&
+      sortedByOrder &&
+      departmentRows.every((row) => typeof row.memberCount === "number") &&
+      memberTotal === 20,
+    `${departmentRows.length} rows, ${memberTotal} memberships`,
+  );
+
+  const managementUser = (Array.isArray(hoUsers.data) ? hoUsers.data : []).find(
+    (u) => u.email === "management@tracker.local",
+  );
+  const managementMemberships = managementUser?.headOfficeMemberships ?? [];
+  check(
+    "management account is Secretarial (primary) in Delhi with 2 departments",
+    managementUser?.departmentName === "Secretarial" &&
+      managementUser?.officeName === "Delhi" &&
+      managementMemberships.length === 2 &&
+      managementMemberships.some((m) => m.code === "SEC" && m.isPrimary),
+    `${managementUser?.departmentName ?? "missing"} / ${managementUser?.officeName ?? "no office"} / ${managementMemberships.length} memberships`,
+  );
+
+  // Membership lifecycle on a throwaway user, removed again in `finally`.
+  const adminDepartment = departmentRows[0];
+  if (adminDepartment) {
+    const throwaway = await db.user.create({
+      data: {
+        name: "Smoke Throwaway",
+        email: `smoke.throwaway.${Date.now()}@tracker.local`,
+        passwordHash: "unused",
+        active: true,
+      },
+      select: { id: true, email: true },
+    });
+    try {
+      const grant = await api(admin, "POST", "/api/head-office-memberships", {
+        userId: throwaway.id,
+        departmentId: adminDepartment.id,
+        isPrimary: true,
+      });
+      const afterGrant = await api(admin, "GET", "/api/users");
+      const grantedRole = (Array.isArray(afterGrant.data) ? afterGrant.data : []).find(
+        (u) => u.id === throwaway.id,
+      )?.role;
+      check(
+        "granting a department makes the user HEAD_OFFICE",
+        grant.status === 201 && grantedRole === "HEAD_OFFICE",
+        `HTTP ${grant.status}, role ${grantedRole ?? "missing"}`,
+      );
+
+      const revoke = await api(
+        admin,
+        "DELETE",
+        `/api/head-office-memberships?userId=${throwaway.id}&departmentId=${adminDepartment.id}`,
+      );
+      const afterRevoke = await api(admin, "GET", "/api/users");
+      const revokedRole = (Array.isArray(afterRevoke.data) ? afterRevoke.data : []).find(
+        (u) => u.id === throwaway.id,
+      )?.role;
+      check(
+        "removing the only membership returns the user to PROJECT_MANAGER",
+        revoke.status === 200 && revokedRole === "PROJECT_MANAGER",
+        `HTTP ${revoke.status}, role ${revokedRole ?? "missing"}`,
+      );
+    } finally {
+      await db.headOfficeMembership.deleteMany({ where: { userId: throwaway.id } });
+      await db.projectAssignment.deleteMany({ where: { userId: throwaway.id } });
+      await db.plazaAssignment.deleteMany({ where: { userId: throwaway.id } });
+      await db.user.delete({ where: { id: throwaway.id } }).catch(() => undefined);
+    }
+    const leftover = await db.user.count({ where: { email: throwaway.email } });
+    check(
+      "throwaway user and memberships cleaned up",
+      leftover === 0 &&
+        (await db.headOfficeMembership.count({ where: { userId: throwaway.id } })) === 0,
+      `${throwaway.email} removed`,
+    );
+  }
+
+  // --- Cross-company Head Office regression -----------------------------
+  // A Treasury lead has no per-company row: membership alone must open a task
+  // in every company (regression for the old company-scoped 403).
+  const treasury = await login("dept.treas@tracker.local", "Manage@123");
+  const companies = await db.company.findMany({
+    select: { id: true, code: true },
+    orderBy: { code: "asc" },
+  });
+  const crossCompany = [];
+  for (const company of companies) {
+    const companyTask = await db.task.findFirst({
+      where: { project: { companyId: company.id } },
+      select: { id: true },
+    });
+    if (!companyTask) {
+      crossCompany.push({ code: company.code, status: 0 });
+      continue;
+    }
+    const detail = await api(treasury, "GET", `/api/tasks/${companyTask.id}`);
+    crossCompany.push({ code: company.code, status: detail.status });
+  }
+  check(
+    "Treasury HO can open a task in every company",
+    Boolean(treasury.session?.user?.id) &&
+      crossCompany.length === 3 &&
+      crossCompany.every((row) => row.status === 200),
+    crossCompany.map((row) => `${row.code} ${row.status}`).join(", "),
+  );
+
   // --- Site manager scope ----------------------------------------------
   const site = await db.plazaAssignment.findFirst({
     where: {
       user: {
         isAdmin: false,
-        companyAssignments: { none: {} },
+        headOfficeMemberships: { none: {} },
         projectAssignments: { none: {} },
       },
     },
@@ -228,7 +347,7 @@ async function main() {
       where: {
         id: { not: site.userId },
         isAdmin: false,
-        companyAssignments: { none: {} },
+        headOfficeMemberships: { none: {} },
         projectAssignments: { none: {} },
       },
       select: { id: true },
@@ -330,7 +449,7 @@ async function main() {
 
     // Assignment ceiling for a site manager.
     const hoUser = await db.user.findFirst({
-      where: { isAdmin: false, companyAssignments: { some: {} } },
+      where: { isAdmin: false, headOfficeMemberships: { some: {} } },
       select: { id: true },
     });
     const siblingSite = await db.plazaAssignment.findFirst({
@@ -403,7 +522,7 @@ async function main() {
     where: {
       user: {
         isAdmin: false,
-        companyAssignments: { none: {} },
+        headOfficeMemberships: { none: {} },
       },
     },
     include: { user: true, project: true },

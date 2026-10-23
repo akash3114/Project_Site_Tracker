@@ -1,7 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
-import { MASTER_COMPANIES } from "./master-data";
+import {
+  MASTER_COMPANIES,
+  MASTER_DEPARTMENTS,
+  MASTER_OFFICES,
+} from "./master-data";
 
 const db = new PrismaClient();
 
@@ -87,6 +91,21 @@ const COMMENT_POOL = [
   "Noted in site register for record.",
 ];
 
+// Departments whose demo lead sits in the Delhi office; the rest sit in
+// Mumbai. Purely demo distribution, mirroring the plan.
+const DELHI_DEPARTMENT_CODES = new Set([
+  "ADMIN",
+  "FIN",
+  "SEC",
+  "TREAS",
+  "INV",
+  "LEGAL",
+  "IA",
+  "HR-LD",
+  "HR-COMP",
+  "HR-RP",
+]);
+
 function dueDateFor(index: number, now: Date): Date | null {
   const day = 24 * 60 * 60 * 1000;
   const atMidnightUTC = (t: number) => {
@@ -109,13 +128,55 @@ async function main(): Promise<void> {
     await db.task.deleteMany();
     await db.plazaAssignment.deleteMany();
     await db.projectAssignment.deleteMany();
-    await db.companyAssignment.deleteMany();
+    await db.headOfficeMembership.deleteMany();
     await db.plaza.deleteMany();
     await db.project.deleteMany();
     await db.taskCategory.deleteMany();
     await db.company.deleteMany();
     await db.user.deleteMany();
+    await db.office.deleteMany();
+    await db.department.deleteMany();
   }
+
+  // ---- Head Office catalogue --------------------------------------------
+  // Upserted by their natural keys: the migration already created Admin /
+  // Delhi / Mumbai with fixed ids and the backfilled memberships point at
+  // them, so these rows must survive (and the ids must not change).
+  const departmentIdByCode = new Map<string, string>();
+  for (const masterDepartment of MASTER_DEPARTMENTS) {
+    const department = await db.department.upsert({
+      where: { code: masterDepartment.code },
+      update: {
+        name: masterDepartment.name,
+        sortOrder: masterDepartment.sortOrder,
+        active: true,
+      },
+      create: {
+        name: masterDepartment.name,
+        code: masterDepartment.code,
+        sortOrder: masterDepartment.sortOrder,
+        active: true,
+      },
+    });
+    departmentIdByCode.set(department.code, department.id);
+  }
+
+  const officeIdByName = new Map<string, string>();
+  for (const masterOffice of MASTER_OFFICES) {
+    const office = await db.office.upsert({
+      where: { name: masterOffice.name },
+      update: { city: masterOffice.city || null, active: true },
+      create: {
+        name: masterOffice.name,
+        city: masterOffice.city || null,
+        active: true,
+      },
+    });
+    officeIdByName.set(office.name, office.id);
+  }
+
+  const delhiOfficeId = officeIdByName.get("Delhi")!;
+  const mumbaiOfficeId = officeIdByName.get("Mumbai")!;
 
   const admin = await db.user.create({
     data: {
@@ -128,6 +189,7 @@ async function main(): Promise<void> {
   });
 
   const fieldPasswordHash = await hashPw(FIELD_PASSWORD);
+  // C-suite shared account: primary Secretarial, secondary Finance, Delhi.
   const management = await db.user.create({
     data: {
       name: "NHIT Head Office",
@@ -137,6 +199,7 @@ async function main(): Promise<void> {
       ),
       isAdmin: false,
       active: true,
+      officeId: delhiOfficeId,
     },
   });
 
@@ -195,13 +258,16 @@ async function main(): Promise<void> {
     }
   }
 
-  // Head Office covers every company.
-  for (const company of await db.company.findMany({ select: { id: true } })) {
-    await db.companyAssignment.create({
+  // C-suite shared account: Secretarial primary, Finance & Accounts secondary.
+  for (const [code, isPrimary] of [
+    ["SEC", true],
+    ["FIN", false],
+  ] as const) {
+    await db.headOfficeMembership.create({
       data: {
-        companyId: company.id,
         userId: management.id,
-        role: "HEAD_OFFICE",
+        departmentId: departmentIdByCode.get(code)!,
+        isPrimary,
         assignedById: admin.id,
       },
     });
@@ -225,6 +291,9 @@ async function main(): Promise<void> {
     management.email,
     "admin@tracker.local",
     "management@tracker.local",
+    ...MASTER_DEPARTMENTS.map(
+      (department) => `dept.${department.code.toLowerCase()}@tracker.local`,
+    ),
   ]);
   function emailFor(name: string): string {
     const base = `${slug(name)}@tracker.local`;
@@ -251,6 +320,32 @@ async function main(): Promise<void> {
       },
     });
     userIdByName.set(name, user.id);
+  }
+
+  // One demo Head Office lead per department: dept.<code>@tracker.local,
+  // password Manage@123, primary membership on their own department.
+  const hoLeadPasswordHash = await hashPw(HO_PASSWORD);
+  for (const masterDepartment of MASTER_DEPARTMENTS) {
+    const departmentId = departmentIdByCode.get(masterDepartment.code)!;
+    await db.user.create({
+      data: {
+        name: `${masterDepartment.name} Lead`,
+        email: `dept.${masterDepartment.code.toLowerCase()}@tracker.local`,
+        passwordHash: hoLeadPasswordHash,
+        isAdmin: false,
+        active: true,
+        officeId: DELHI_DEPARTMENT_CODES.has(masterDepartment.code)
+          ? delhiOfficeId
+          : mumbaiOfficeId,
+        headOfficeMemberships: {
+          create: {
+            departmentId,
+            isPrimary: true,
+            assignedById: admin.id,
+          },
+        },
+      },
+    });
   }
 
   // ---- Assignments -------------------------------------------------------
@@ -462,12 +557,28 @@ async function main(): Promise<void> {
     });
   }
 
-  const [companies, projectsCount, plazas, users, tasks] = await Promise.all([
+  const [
+    companies,
+    projectsCount,
+    plazas,
+    users,
+    tasks,
+    offices,
+    departments,
+    headOfficeMemberships,
+    activities,
+    pendingReopen,
+  ] = await Promise.all([
     db.company.count(),
     db.project.count(),
     db.plaza.count(),
     db.user.count(),
     db.task.count(),
+    db.office.count(),
+    db.department.count(),
+    db.headOfficeMembership.count(),
+    db.taskActivity.count(),
+    db.taskReopenRequest.count({ where: { status: "PENDING" } }),
   ]);
 
   // eslint-disable-next-line no-console
@@ -476,8 +587,13 @@ async function main(): Promise<void> {
       companies,
       projects: projectsCount,
       plazas,
+      offices,
+      departments,
       users,
+      headOfficeMemberships,
       tasks,
+      activities,
+      pendingReopen,
       categories: categories.length,
       taskIds: createdTaskIds.length,
     }),

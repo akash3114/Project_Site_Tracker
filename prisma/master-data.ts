@@ -24,6 +24,17 @@ export type MasterCompany = {
   projects: MasterProject[];
 };
 
+export type MasterDepartment = {
+  name: string;
+  code: string;
+  sortOrder: number;
+};
+
+export type MasterOffice = {
+  name: string;
+  city: string;
+};
+
 export const MASTER_COMPANIES: MasterCompany[] = [
   {
     "name": "NHIT Eastern Projects Private Limited",
@@ -879,5 +890,109 @@ export const MASTER_COMPANIES: MasterCompany[] = [
         ]
       }
     ]
+  }
+];
+
+export const MASTER_DEPARTMENTS: MasterDepartment[] = [
+  {
+    "name": "Admin",
+    "code": "ADMIN",
+    "sortOrder": 1
+  },
+  {
+    "name": "BMS",
+    "code": "BMS",
+    "sortOrder": 4
+  },
+  {
+    "name": "EHS",
+    "code": "EHS",
+    "sortOrder": 5
+  },
+  {
+    "name": "Finance & Accounts",
+    "code": "FIN",
+    "sortOrder": 6
+  },
+  {
+    "name": "HR - Learning & Development",
+    "code": "HR-LD",
+    "sortOrder": 7
+  },
+  {
+    "name": "HR-Compliance",
+    "code": "HR-COMP",
+    "sortOrder": 8
+  },
+  {
+    "name": "HR-Recruitment & Payroll",
+    "code": "HR-RP",
+    "sortOrder": 9
+  },
+  {
+    "name": "Initial Improvement/MMR",
+    "code": "MMR",
+    "sortOrder": 10
+  },
+  {
+    "name": "Internal Audit",
+    "code": "IA",
+    "sortOrder": 11
+  },
+  {
+    "name": "Investment & Acquisitions",
+    "code": "INV",
+    "sortOrder": 12
+  },
+  {
+    "name": "IT",
+    "code": "IT",
+    "sortOrder": 13
+  },
+  {
+    "name": "ITS",
+    "code": "ITS",
+    "sortOrder": 14
+  },
+  {
+    "name": "Legal",
+    "code": "LEGAL",
+    "sortOrder": 15
+  },
+  {
+    "name": "Maintenance",
+    "code": "MAINT",
+    "sortOrder": 16
+  },
+  {
+    "name": "Operations",
+    "code": "OPS",
+    "sortOrder": 17
+  },
+  {
+    "name": "Procurement",
+    "code": "PROC",
+    "sortOrder": 18
+  },
+  {
+    "name": "Secretarial",
+    "code": "SEC",
+    "sortOrder": 19
+  },
+  {
+    "name": "Treasury",
+    "code": "TREAS",
+    "sortOrder": 20
+  }
+];
+
+export const MASTER_OFFICES: MasterOffice[] = [
+  {
+    "name": "Delhi",
+    "city": "Delhi"
+  },
+  {
+    "name": "Mumbai",
+    "city": "Mumbai"
   }
 ];

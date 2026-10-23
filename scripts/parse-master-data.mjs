@@ -7,9 +7,15 @@ const root = join(here, "..");
 const source = readFileSync(join(root, "docs", "master-data.md"), "utf8");
 
 const companies = [];
+const departments = [];
+const offices = [];
 let company = null;
 let project = null;
 let plaza = null;
+// `## Head Office ...` tables switch the parser out of company mode. Kept
+// separate from `###` (company) and `#####` (project) so company parsing is
+// byte-for-byte unchanged.
+let section = null;
 
 function cleanName(value) {
   return value
@@ -21,6 +27,13 @@ function cleanName(value) {
         .trim(),
     )
     .filter(Boolean);
+}
+
+function tableCells(line) {
+  if (!line.startsWith("|")) return null;
+  const parts = line.split("|");
+  if (parts.length < 4) return null; // at least: "", cell, cell, ""
+  return parts.slice(1, -1).map((cell) => cell.trim());
 }
 
 function pushManager(line) {
@@ -40,6 +53,34 @@ function pushManager(line) {
 for (const rawLine of source.split(/\r?\n/)) {
   const line = rawLine.trim();
   if (!line) continue;
+
+  const sectionMatch = line.match(/^##\s+(.+)$/);
+  if (sectionMatch) {
+    const heading = sectionMatch[1].trim().toLowerCase();
+    if (heading === "head office departments") section = "departments";
+    else if (heading === "head office offices") section = "offices";
+    else section = null;
+    continue;
+  }
+
+  if (section) {
+    // Inside a `##` catalogue table: only `| n | ... |` rows matter, every
+    // other line (blank, prose, headings of another level) is skipped.
+    const cells = tableCells(line);
+    if (!cells) continue;
+    const sortOrder = Number(cells[0]);
+    if (!Number.isInteger(sortOrder)) continue; // header or `|---|---|`
+    const name = (cells[1] ?? "").trim();
+    if (!name) continue;
+    if (section === "departments") {
+      const code = (cells[2] ?? "").trim();
+      if (!code) throw new Error(`Department without code: ${line}`);
+      departments.push({ name, code, sortOrder });
+    } else {
+      offices.push({ name, city: (cells[2] ?? "").trim() });
+    }
+    continue;
+  }
 
   const companyMatch = line.match(/^###\s+(.+)$/);
   if (companyMatch) {
@@ -131,11 +172,22 @@ const plazaCount = companies.reduce(
   0,
 );
 
+const departmentCodes = new Set(departments.map((d) => d.code));
+if (departmentCodes.size !== departments.length) {
+  throw new Error("Duplicate department code in docs/master-data.md");
+}
+const officeNames = new Set(offices.map((o) => o.name));
+if (officeNames.size !== offices.length) {
+  throw new Error("Duplicate office name in docs/master-data.md");
+}
+
 console.log({
   companies: companies.length,
   projects: projectCount,
   plazas: plazaCount,
   fieldNames: fieldNames.size,
+  departments: departments.length,
+  offices: offices.length,
 });
 
 const banner = `// Generated from docs/master-data.md by scripts/parse-master-data.mjs.
@@ -166,7 +218,22 @@ export type MasterCompany = {
   projects: MasterProject[];
 };
 
+export type MasterDepartment = {
+  name: string;
+  code: string;
+  sortOrder: number;
+};
+
+export type MasterOffice = {
+  name: string;
+  city: string;
+};
+
 export const MASTER_COMPANIES: MasterCompany[] = ${JSON.stringify(companies, null, 2)};
+
+export const MASTER_DEPARTMENTS: MasterDepartment[] = ${JSON.stringify(departments, null, 2)};
+
+export const MASTER_OFFICES: MasterOffice[] = ${JSON.stringify(offices, null, 2)};
 `;
 
 writeFileSync(join(root, "prisma", "master-data.ts"), banner + body, "utf8");

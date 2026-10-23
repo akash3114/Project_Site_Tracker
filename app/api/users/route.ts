@@ -7,18 +7,37 @@ import type { Role } from "@/lib/labels";
 import { userSchema } from "@/lib/validations";
 
 const assignmentInclude = {
-  companyAssignments: { select: { companyId: true, role: true } },
+  office: { select: { name: true } },
+  headOfficeMemberships: {
+    select: {
+      departmentId: true,
+      isPrimary: true,
+      department: { select: { code: true, name: true, sortOrder: true } },
+    },
+  },
   projectAssignments: { select: { projectId: true } },
   plazaAssignments: { select: { plazaId: true, role: true } },
 } as const;
 
 function displayRole(user: {
   isAdmin: boolean;
-  companyAssignments: unknown[];
+  headOfficeMemberships: unknown[];
 }): Role {
   if (user.isAdmin) return "ADMIN";
-  if (user.companyAssignments.length > 0) return "HEAD_OFFICE";
+  if (user.headOfficeMemberships.length > 0) return "HEAD_OFFICE";
   return "PROJECT_MANAGER";
+}
+
+/** Primary membership, else the one with the lowest department sortOrder. */
+function mainMembership<
+  T extends { isPrimary: boolean; department: { sortOrder: number } },
+>(memberships: T[]): T | null {
+  const primary = memberships.find((m) => m.isPrimary);
+  if (primary) return primary;
+  const ordered = [...memberships].sort(
+    (a, b) => a.department.sortOrder - b.department.sortOrder,
+  );
+  return ordered[0] ?? null;
 }
 
 /** GET /api/users → Admin/Head Office directory with assignment ids. */
@@ -45,21 +64,37 @@ export async function GET(): Promise<Response> {
   });
 
   return NextResponse.json(
-    users.map((u) => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      phone: u.phone,
-      role: displayRole(u),
-      isAdmin: u.isAdmin,
-      active: u.active,
-      createdAt: u.createdAt,
-      updatedAt: u.updatedAt,
-      companyIds: u.companyAssignments.map((r) => r.companyId),
-      projectIds: u.projectAssignments.map((r) => r.projectId),
-      plazaIds: u.plazaAssignments.map((r) => r.plazaId),
-      plazaRoles: u.plazaAssignments,
-    })),
+    users.map((u) => {
+      const memberships = [...u.headOfficeMemberships].sort(
+        (a, b) =>
+          Number(b.isPrimary) - Number(a.isPrimary) ||
+          a.department.sortOrder - b.department.sortOrder,
+      );
+      const main = mainMembership(u.headOfficeMemberships);
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        role: displayRole(u),
+        isAdmin: u.isAdmin,
+        active: u.active,
+        createdAt: u.createdAt,
+        updatedAt: u.updatedAt,
+        headOfficeMemberships: memberships.map((m) => ({
+          departmentId: m.departmentId,
+          code: m.department.code,
+          name: m.department.name,
+          isPrimary: m.isPrimary,
+        })),
+        departmentName: main?.department.name ?? null,
+        departmentCode: main?.department.code ?? null,
+        officeName: u.office?.name ?? null,
+        projectIds: u.projectAssignments.map((r) => r.projectId),
+        plazaIds: u.plazaAssignments.map((r) => r.plazaId),
+        plazaRoles: u.plazaAssignments,
+      };
+    }),
   );
 }
 

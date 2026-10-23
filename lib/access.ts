@@ -9,6 +9,10 @@ export type SessionUser = {
   /** Display level only: Admin > Head Office > Project Manager (includes site managers). */
   role: Role;
   isAdmin: boolean;
+  /** Primary Head Office department, else the lowest `sortOrder` one. Null when not HO. */
+  departmentName: string | null;
+  /** Head Office office/city. Null when unset. */
+  officeName: string | null;
 };
 
 /** Highest role a person holds in a task's scope. */
@@ -22,6 +26,32 @@ export type TaskWithScope = Pick<
   Task,
   "projectId" | "plazaId" | "status" | "assigneeId" | "createdById"
 >;
+
+/** Department fields every membership select needs for display/ordering. */
+const membershipDepartmentSelect = {
+  name: true,
+  sortOrder: true,
+} as const;
+
+type MembershipDepartment = {
+  isPrimary: boolean;
+  department: { name: string; sortOrder: number };
+};
+
+/**
+ * Primary department name, falling back to the membership with the lowest
+ * department `sortOrder`. Null when the person holds no department.
+ */
+function departmentNameOf(
+  memberships: MembershipDepartment[],
+): string | null {
+  const primary = memberships.find((m) => m.isPrimary);
+  if (primary) return primary.department.name;
+  const ordered = [...memberships].sort(
+    (a, b) => a.department.sortOrder - b.department.sortOrder,
+  );
+  return ordered[0]?.department.name ?? null;
+}
 
 /**
  * Current session user. The JWT only carries the id; the display role and
@@ -39,7 +69,10 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       id: true,
       active: true,
       isAdmin: true,
-      companyAssignments: { select: { companyId: true }, take: 1 },
+      office: { select: { name: true } },
+      headOfficeMemberships: {
+        select: { isPrimary: true, department: { select: membershipDepartmentSelect } },
+      },
     },
   });
   if (!user?.active) return null;
@@ -49,9 +82,11 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     isAdmin: user.isAdmin,
     role: user.isAdmin
       ? "ADMIN"
-      : user.companyAssignments.length > 0
+      : user.headOfficeMemberships.length > 0
         ? "HEAD_OFFICE"
         : "PROJECT_MANAGER",
+    departmentName: departmentNameOf(user.headOfficeMemberships),
+    officeName: user.office?.name ?? null,
   };
 }
 
@@ -212,23 +247,10 @@ export async function effectiveTaskRole(
   task: TaskWithScope,
 ): Promise<ScopeRole | null> {
   if (user.isAdmin) return "ADMIN";
+  // Head Office is global: membership is not scoped to a company/project.
+  if (user.role === "HEAD_OFFICE") return "HEAD_OFFICE";
 
-  const project = await db.project.findUnique({
-    where: { id: task.projectId },
-    select: { companyId: true },
-  });
-  if (!project) return null;
-
-  const [ho, pm, site] = await Promise.all([
-    db.companyAssignment.findUnique({
-      where: {
-        companyId_userId: {
-          companyId: project.companyId,
-          userId: user.id,
-        },
-      },
-      select: { companyId: true },
-    }),
+  const [pm, site] = await Promise.all([
     db.projectAssignment.findUnique({
       where: {
         projectId_userId: { projectId: task.projectId, userId: user.id },
@@ -243,7 +265,6 @@ export async function effectiveTaskRole(
       : Promise.resolve(null),
   ]);
 
-  if (ho) return "HEAD_OFFICE";
   if (pm) return "PROJECT_MANAGER";
   if (site) return "SITE_MANAGER";
   // A site manager assigned a project-level task still needs status/comment
@@ -259,22 +280,10 @@ export async function actorScopeRole(
   plazaId: string | null,
 ): Promise<ScopeRole | null> {
   if (user.isAdmin) return "ADMIN";
-  const project = await db.project.findUnique({
-    where: { id: projectId },
-    select: { companyId: true },
-  });
-  if (!project) return null;
+  // Head Office is global: membership is not scoped to a company/project.
+  if (user.role === "HEAD_OFFICE") return "HEAD_OFFICE";
 
-  const [ho, pm, site] = await Promise.all([
-    db.companyAssignment.findUnique({
-      where: {
-        companyId_userId: {
-          companyId: project.companyId,
-          userId: user.id,
-        },
-      },
-      select: { companyId: true },
-    }),
+  const [pm, site] = await Promise.all([
     db.projectAssignment.findUnique({
       where: { projectId_userId: { projectId, userId: user.id } },
       select: { projectId: true },
@@ -287,7 +296,6 @@ export async function actorScopeRole(
       : Promise.resolve(null),
   ]);
 
-  if (ho) return "HEAD_OFFICE";
   if (pm) return "PROJECT_MANAGER";
   if (site) return "SITE_MANAGER";
   return null;
@@ -417,22 +425,14 @@ async function targetRoleOnScope(
   if (!target?.active) return null;
   if (target.isAdmin) return "ADMIN";
 
-  const project = await db.project.findUnique({
-    where: { id: projectId },
-    select: { companyId: true },
+  // Any Head Office membership makes the target HO — global, no company check.
+  const ho = await db.headOfficeMembership.findFirst({
+    where: { userId: targetUserId },
+    select: { userId: true },
   });
-  if (!project) return null;
+  if (ho) return "HEAD_OFFICE";
 
-  const [ho, pm, site] = await Promise.all([
-    db.companyAssignment.findUnique({
-      where: {
-        companyId_userId: {
-          companyId: project.companyId,
-          userId: targetUserId,
-        },
-      },
-      select: { companyId: true },
-    }),
+  const [pm, site] = await Promise.all([
     db.projectAssignment.findUnique({
       where: {
         projectId_userId: { projectId, userId: targetUserId },
@@ -450,7 +450,6 @@ async function targetRoleOnScope(
         }),
   ]);
 
-  if (ho) return "HEAD_OFFICE";
   if (pm) return "PROJECT_MANAGER";
   if (site) return "SITE_MANAGER";
   return null;
@@ -501,10 +500,18 @@ export async function assigneeCandidates(
   actorRole: ScopeRole,
   projectId: string,
   plazaId: string | null,
-): Promise<{ id: string; name: string; role: TargetRole }[]> {
+): Promise<
+  {
+    id: string;
+    name: string;
+    role: TargetRole;
+    department?: string | null;
+    office?: string | null;
+  }[]
+> {
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { companyId: true },
+    select: { id: true },
   });
   if (!project) return [];
 
@@ -515,7 +522,10 @@ export async function assigneeCandidates(
         id: true,
         name: true,
         isAdmin: true,
-        companyAssignments: { select: { companyId: true }, take: 1 },
+        office: { select: { name: true } },
+        headOfficeMemberships: {
+          select: { isPrimary: true, department: { select: membershipDepartmentSelect } },
+        },
         projectAssignments: { select: { projectId: true }, take: 1 },
         plazaAssignments: { select: { plazaId: true }, take: 1 },
       },
@@ -524,17 +534,19 @@ export async function assigneeCandidates(
     return users.map((u) => {
       let role: TargetRole = "SITE_MANAGER";
       if (u.isAdmin) role = "ADMIN";
-      else if (u.companyAssignments.length > 0) role = "HEAD_OFFICE";
+      else if (u.headOfficeMemberships.length > 0) role = "HEAD_OFFICE";
       else if (u.projectAssignments.length > 0) role = "PROJECT_MANAGER";
-      return { id: u.id, name: u.name, role };
+      return {
+        id: u.id,
+        name: u.name,
+        role,
+        department: departmentNameOf(u.headOfficeMemberships),
+        office: u.office?.name ?? null,
+      };
     });
   }
 
-  const [ho, pms, site] = await Promise.all([
-    db.companyAssignment.findMany({
-      where: { companyId: project.companyId, user: { active: true } },
-      select: { user: { select: { id: true, name: true } } },
-    }),
+  const [pms, site] = await Promise.all([
     db.projectAssignment.findMany({
       where: { projectId, user: { active: true } },
       select: { user: { select: { id: true, name: true } } },
@@ -550,7 +562,15 @@ export async function assigneeCandidates(
         }),
   ]);
 
-  const rows: { id: string; name: string; role: TargetRole }[] = [
+  type Candidate = {
+    id: string;
+    name: string;
+    role: TargetRole;
+    department?: string | null;
+    office?: string | null;
+  };
+
+  const rows: Candidate[] = [
     ...pms.map((r) => ({
       id: r.user.id,
       name: r.user.name,
@@ -564,18 +584,40 @@ export async function assigneeCandidates(
   ];
 
   if (actorRole === "PROJECT_MANAGER") {
+    // Head Office is global, so every active HO member is eligible here.
+    const [ho, admins] = await Promise.all([
+      db.headOfficeMembership.findMany({
+        where: { user: { active: true } },
+        select: {
+          isPrimary: true,
+          department: { select: membershipDepartmentSelect },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              office: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: [
+          { isPrimary: "desc" },
+          { department: { sortOrder: "asc" } },
+          { user: { name: "asc" } },
+        ],
+      }),
+      db.user.findMany({
+        where: { isAdmin: true, active: true },
+        select: { id: true, name: true },
+      }),
+    ]);
     rows.push(
       ...ho.map((r) => ({
         id: r.user.id,
         name: r.user.name,
         role: "HEAD_OFFICE" as const,
+        department: departmentNameOf([r]),
+        office: r.user.office?.name ?? null,
       })),
-    );
-    const admins = await db.user.findMany({
-      where: { isAdmin: true, active: true },
-      select: { id: true, name: true },
-    });
-    rows.push(
       ...admins.map((u) => ({
         id: u.id,
         name: u.name,

@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { roleLabel } from "@/lib/labels";
+
+type MembershipItem = {
+  departmentId: string;
+  code: string;
+  name: string;
+  isPrimary: boolean;
+};
 
 type UserItem = {
   id: string;
@@ -13,6 +20,18 @@ type UserItem = {
   isAdmin: boolean;
   active: boolean;
   plazaIds: string[];
+  headOfficeMemberships: MembershipItem[];
+  departmentName: string | null;
+  departmentCode: string | null;
+  officeName: string | null;
+};
+
+type DepartmentOption = {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+  memberCount: number;
 };
 
 async function readError(res: Response): Promise<string> {
@@ -35,6 +54,9 @@ const btnCls =
 /** ADMIN users table + create/deactivate/reset wired to /api/users. */
 export function UsersManager() {
   const [items, setItems] = useState<UserItem[]>([]);
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [departmentError, setDepartmentError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -54,9 +76,21 @@ export function UsersManager() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/users");
+      const [res, deptRes] = await Promise.all([
+        fetch("/api/users"),
+        fetch("/api/departments"),
+      ]);
       if (!res.ok) throw new Error(await readError(res));
       setItems((await res.json()) as UserItem[]);
+      // The department filter is optional: a failure leaves "All departments"
+      // usable and the table intact.
+      if (deptRes.ok) {
+        setDepartments((await deptRes.json()) as DepartmentOption[]);
+        setDepartmentError(null);
+      } else {
+        setDepartments([]);
+        setDepartmentError(await readError(deptRes));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load users");
     } finally {
@@ -67,6 +101,18 @@ export function UsersManager() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const filtered = useMemo(
+    () =>
+      departmentFilter === "all"
+        ? items
+        : items.filter((u) =>
+            u.headOfficeMemberships.some(
+              (m) => m.departmentId === departmentFilter,
+            ),
+          ),
+    [items, departmentFilter],
+  );
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(true);
@@ -196,6 +242,10 @@ export function UsersManager() {
               <option value="ADMIN">Admin</option>
             </select>
           </label>
+          <p className="text-xs text-[#586760] md:col-span-2">
+            New users start with no scopes. Department, project and plaza
+            assignments are set on the Access page.
+          </p>
           <div className="flex gap-2 md:col-span-2">
             <button
               type="submit"
@@ -222,93 +272,166 @@ export function UsersManager() {
           {error}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
-          <table className="w-full min-w-[820px] border-collapse">
-            <thead>
-              <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
-                <th className={thCls}>Name</th>
-                <th className={thCls}>Email</th>
-                <th className={thCls}>Account type</th>
-                <th className={thCls}>Active</th>
-                <th className={thCls}>Plazas</th>
-                <th className={thCls}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((u) => (
-                <tr
-                  key={u.id}
-                  className="border-b border-[rgba(23,34,44,0.06)] last:border-0"
-                >
-                  <td className={`${tdCls} font-medium`}>{u.name}</td>
-                  <td className={`${tdCls} font-mono text-xs`}>{u.email}</td>
-                  <td className={tdCls}>
-                    <select
-                      aria-label={`Account type for ${u.email}`}
-                      className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-2 text-sm"
-                      value={u.isAdmin ? "ADMIN" : "FIELD"}
-                      disabled={saving}
-                      onChange={(e) =>
-                        void patch(u.id, {
-                          isAdmin: e.target.value === "ADMIN",
-                        })
-                      }
+        <>
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-[12px] border border-[#CDD6CE] bg-white px-4 py-3">
+            <label className="flex min-w-[240px] flex-col gap-1 text-xs font-medium text-[#1C2824]">
+              Department
+              <select
+                className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-3 py-2 text-sm"
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                disabled={departments.length === 0}
+              >
+                <option value="all">All departments</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {`${department.code} — ${department.name} (${department.memberCount})`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex flex-col gap-1">
+              <p className="font-mono text-xs text-[#586760]">
+                {filtered.length} of {items.length} shown
+              </p>
+              {departmentError ? (
+                <p className="text-xs text-[#8F2824]">
+                  Department filter unavailable: {departmentError}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
+            <table className="w-full min-w-[1080px] border-collapse">
+              <thead>
+                <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
+                  <th className={thCls}>Name</th>
+                  <th className={thCls}>Email</th>
+                  <th className={thCls}>Account type</th>
+                  <th className={thCls}>Department</th>
+                  <th className={thCls}>Office</th>
+                  <th className={thCls}>Active</th>
+                  <th className={thCls}>Plazas</th>
+                  <th className={thCls}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className={`${tdCls} text-[#586760]`}
                     >
-                      <option value="FIELD">{roleLabel(u.role)}</option>
-                      <option value="ADMIN">Admin</option>
-                    </select>
-                  </td>
-                  <td className={tdCls}>{u.active ? "Yes" : "No"}</td>
-                  <td className={tdCls}>{u.plazaIds.length}</td>
-                  <td className={tdCls}>
-                    <span className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
+                      No users match the department filter.
+                    </td>
+                  </tr>
+                ) : null}
+                {filtered.map((u) => (
+                  <tr
+                    key={u.id}
+                    className="border-b border-[rgba(23,34,44,0.06)] last:border-0"
+                  >
+                    <td className={`${tdCls} font-medium`}>{u.name}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{u.email}</td>
+                    <td className={tdCls}>
+                      <select
+                        aria-label={`Account type for ${u.email}`}
+                        className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-2 text-sm"
+                        value={u.isAdmin ? "ADMIN" : "FIELD"}
                         disabled={saving}
-                        onClick={() =>
-                          void patch(u.id, { active: !u.active })
+                        onChange={(e) =>
+                          void patch(u.id, {
+                            isAdmin: e.target.value === "ADMIN",
+                          })
                         }
-                        className={btnCls}
                       >
-                        {u.active ? "Deactivate" : "Reactivate"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResetFor(resetFor === u.id ? null : u.id);
-                          setResetPw("");
-                          setFormError(null);
-                        }}
-                        className={btnCls}
-                      >
-                        Reset pw
-                      </button>
-                    </span>
-                    {resetFor === u.id ? (
-                      <span className="mt-2 flex gap-2">
-                        <input
-                          className={inputCls}
-                          type="password"
-                          placeholder="New password (min 6)"
-                          value={resetPw}
-                          onChange={(e) => setResetPw(e.target.value)}
-                        />
+                        <option value="FIELD">{roleLabel(u.role)}</option>
+                        <option value="ADMIN">Admin</option>
+                      </select>
+                    </td>
+                    <td className={tdCls}>
+                      {u.departmentName ? (
+                        <span
+                          className="flex flex-wrap items-center gap-1.5"
+                          title={u.headOfficeMemberships
+                            .map((m) => m.name)
+                            .join(", ")}
+                        >
+                          <span className="font-mono text-[11px] text-[#66756D]">
+                            {u.departmentCode ?? "—"}
+                          </span>
+                          <span>{u.departmentName}</span>
+                          {u.headOfficeMemberships.some((m) => m.isPrimary) ? (
+                            <span className="rounded bg-[#E8F0DD] px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wide text-[#385A2B]">
+                              Primary
+                            </span>
+                          ) : null}
+                          {u.headOfficeMemberships.length > 1 ? (
+                            <span className="text-xs text-[#66756D]">
+                              +{u.headOfficeMemberships.length - 1}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="text-[#66756D]">—</span>
+                      )}
+                    </td>
+                    <td className={`${tdCls} text-[#586760]`}>
+                      {u.officeName ?? "—"}
+                    </td>
+                    <td className={tdCls}>{u.active ? "Yes" : "No"}</td>
+                    <td className={tdCls}>{u.plazaIds.length}</td>
+                    <td className={tdCls}>
+                      <span className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           disabled={saving}
-                          onClick={() => void resetPassword(u.id)}
-                          className="inline-flex min-h-[44px] shrink-0 items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                          onClick={() =>
+                            void patch(u.id, { active: !u.active })
+                          }
+                          className={btnCls}
                         >
-                          Set
+                          {u.active ? "Deactivate" : "Reactivate"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetFor(resetFor === u.id ? null : u.id);
+                            setResetPw("");
+                            setFormError(null);
+                          }}
+                          className={btnCls}
+                        >
+                          Reset pw
                         </button>
                       </span>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      {resetFor === u.id ? (
+                        <span className="mt-2 flex gap-2">
+                          <input
+                            className={inputCls}
+                            type="password"
+                            placeholder="New password (min 6)"
+                            value={resetPw}
+                            onChange={(e) => setResetPw(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => void resetPassword(u.id)}
+                            className="inline-flex min-h-[44px] shrink-0 items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                          >
+                            Set
+                          </button>
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

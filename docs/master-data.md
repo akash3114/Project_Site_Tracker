@@ -798,3 +798,32 @@ Maintenance Manager: Satyapal Sopanrao Vaidya
 
 Corridor Manager: Teja Swaroop
 
+## Head Office Departments
+
+| # | Department | Code |
+|---|---|---|
+| 1 | Admin | ADMIN |
+| 4 | BMS | BMS |
+| 5 | EHS | EHS |
+| 6 | Finance & Accounts | FIN |
+| 7 | HR - Learning & Development | HR-LD |
+| 8 | HR-Compliance | HR-COMP |
+| 9 | HR-Recruitment & Payroll | HR-RP |
+| 10 | Initial Improvement/MMR | MMR |
+| 11 | Internal Audit | IA |
+| 12 | Investment & Acquisitions | INV |
+| 13 | IT | IT |
+| 14 | ITS | ITS |
+| 15 | Legal | LEGAL |
+| 16 | Maintenance | MAINT |
+| 17 | Operations | OPS |
+| 18 | Procurement | PROC |
+| 19 | Secretarial | SEC |
+| 20 | Treasury | TREAS |
+
+## Head Office Offices
+
+| # | Office | City |
+|---|---|---|
+| 1 | Delhi | Delhi |
+| 2 | Mumbai | Mumbai |

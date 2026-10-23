@@ -11,7 +11,6 @@ import {
 import type { TaskStatus } from "@prisma/client";
 
 import { fmtDate, fmtDateTimeIST, isOverdue } from "@/lib/format";
-import { SCOPE_ROLE_LABELS } from "@/lib/labels";
 import { ActivityFeed, type FeedEvent } from "./activity-feed";
 import {
   AttachmentList,
@@ -86,9 +85,89 @@ type TaskPermissions = {
   canDelete: boolean;
 };
 
-type AssigneeRow = { id: string; name: string; role?: string | null };
+type CandidateRole =
+  | "ADMIN"
+  | "HEAD_OFFICE"
+  | "PROJECT_MANAGER"
+  | "SITE_MANAGER";
+
+/** Shape returned by GET /api/assignees and GET /api/tasks/:id. */
+type AssigneeCandidate = {
+  id: string;
+  name: string;
+  role?: CandidateRole | null;
+  department?: string | null;
+  office?: string | null;
+};
+
+type AssigneeGroup = {
+  key: string;
+  label: string;
+  rows: AssigneeCandidate[];
+};
 
 type CategoryOption = { id: string; name: string };
+
+const HEAD_OFFICE_FALLBACK = "Head Office";
+
+/**
+ * Group candidates for the assignee picker: Administrators, one group per Head Office
+ * department (alphabetical), then Project managers and Site managers. Empty
+ * groups are dropped. Rows without a known role (the derived fallback list or
+ * a task's current assignee) keep a trailing group so a selected value is
+ * never lost.
+ */
+function groupAssignees(rows: AssigneeCandidate[]): AssigneeGroup[] {
+  const admin: AssigneeCandidate[] = [];
+  const headOffice = new Map<string, AssigneeCandidate[]>();
+  const projectManagers: AssigneeCandidate[] = [];
+  const siteManagers: AssigneeCandidate[] = [];
+  const other: AssigneeCandidate[] = [];
+
+  for (const row of rows) {
+    if (row.role === "ADMIN") {
+      admin.push(row);
+    } else if (row.role === "HEAD_OFFICE") {
+      const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
+      const bucket = headOffice.get(department);
+      if (bucket) bucket.push(row);
+      else headOffice.set(department, [row]);
+    } else if (row.role === "PROJECT_MANAGER") {
+      projectManagers.push(row);
+    } else if (row.role === "SITE_MANAGER") {
+      siteManagers.push(row);
+    } else {
+      other.push(row);
+    }
+  }
+
+  const groups: AssigneeGroup[] = [
+    { key: "admin", label: "Administrators", rows: admin },
+    ...Array.from(headOffice.keys())
+      .sort((a, b) => a.localeCompare(b))
+      .map((department) => ({
+        key: `head-office:${department}`,
+        label: department,
+        rows: headOffice.get(department) ?? [],
+      })),
+    {
+      key: "project-managers",
+      label: "Project managers",
+      rows: projectManagers,
+    },
+    { key: "site-managers", label: "Site managers", rows: siteManagers },
+    { key: "other", label: "Other assignees", rows: other },
+  ];
+
+  return groups.filter((group) => group.rows.length > 0);
+}
+
+/** Native options are one line; HO department rides along as a tooltip. */
+function candidateTitle(row: AssigneeCandidate): string | undefined {
+  if (row.role !== "HEAD_OFFICE") return undefined;
+  const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
+  return `${row.name} · ${department}`;
+}
 
 const PRIORITIES: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"];
 
@@ -158,11 +237,6 @@ function readError(payload: unknown, status: number): string {
   return `Request failed (${status})`;
 }
 
-function roleText(role: string | null | undefined): string {
-  if (!role) return "";
-  return ` · ${SCOPE_ROLE_LABELS[role as keyof typeof SCOPE_ROLE_LABELS] ?? role}`;
-}
-
 /**
  * Task drawer (Sheet): fetch GET /api/tasks/:id, then run core edits, status,
  * assignment, reopen workflow, comments and attachments with refetch
@@ -185,7 +259,7 @@ export function TaskDrawer({
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [permissions, setPermissions] = useState<TaskPermissions | null>(null);
-  const [apiAssignees, setApiAssignees] = useState<AssigneeRow[]>([]);
+  const [apiAssignees, setApiAssignees] = useState<AssigneeCandidate[]>([]);
   const [pendingReopen, setPendingReopen] = useState<ReopenRequest | null>(null);
   const [me, setMe] = useState<{ id: string; name?: string } | null>(null);
   const [categories, setCategories] = useState<CategoryOption[] | null>(null);
@@ -233,7 +307,7 @@ export function TaskDrawer({
             task?: TaskDetail;
             events?: FeedEvent[];
             permissions?: TaskPermissions;
-            assignees?: AssigneeRow[];
+            assignees?: AssigneeCandidate[];
             reopenRequest?: ReopenRequest | null;
           }
         | null;
@@ -357,7 +431,7 @@ export function TaskDrawer({
   }, [editing, permissions]);
 
   const assigneeOptions = useMemo(() => {
-    const base: AssigneeRow[] =
+    const base: AssigneeCandidate[] =
       apiAssignees.length > 0
         ? apiAssignees
         : assignees.map((row) => ({ id: row.id, name: row.name }));
@@ -367,6 +441,11 @@ export function TaskDrawer({
     }
     return rows;
   }, [apiAssignees, assignees, task?.assignee]);
+
+  const assigneeGroups = useMemo(
+    () => groupAssignees(assigneeOptions),
+    [assigneeOptions],
+  );
 
   const lastResolvedReopen = useMemo(() => {
     return (
@@ -710,11 +789,18 @@ export function TaskDrawer({
                   className={`${FIELD} disabled:opacity-60`}
                 >
                   <option value="">Unassigned</option>
-                  {assigneeOptions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                      {roleText(row.role)}
-                    </option>
+                  {assigneeGroups.map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.rows.map((row) => (
+                        <option
+                          key={row.id}
+                          value={row.id}
+                          title={candidateTitle(row)}
+                        >
+                          {row.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 {!permissions?.canAssign ? (

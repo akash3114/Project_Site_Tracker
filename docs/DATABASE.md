@@ -2,25 +2,29 @@
 
 Source of truth: `prisma/schema.prisma` (PostgreSQL 16).
 Hierarchy: **Company → Project → Plaza**, with access granted by assignment:
-`CompanyAssignment (HEAD_OFFICE)` / `ProjectAssignment (Project Manager)` /
+`HeadOfficeMembership (HEAD_OFFICE)` / `ProjectAssignment (Project Manager)` /
 `PlazaAssignment (TOLL | MAINTENANCE | CORRIDOR)`.
 
 There is no account-level role column. `User.isAdmin` is the only account flag;
-everything else is derived from the assignment rows a person holds. Projects and
-plazas have no lifecycle status — only `active` (soft archive).
+everything else is derived from the assignment rows a person holds. Head Office
+is one **global** grant: a department membership is not scoped to a company.
+Departments and offices are organisational metadata only — they never gate
+visibility, task permissions or approvals. Projects and plazas have no lifecycle
+status — only `active` (soft archive).
 
 ## Diagram
 
 ```mermaid
 erDiagram
     companies ||--o{ projects : "owns"
-    companies ||--o{ company_assignments : "head office"
+    offices ||--o{ users : "based at"
+    departments ||--o{ head_office_memberships : "members"
     projects ||--o{ plazas : "contains"
     projects ||--o{ project_assignments : "team"
     projects ||--o{ tasks : "scopes"
     plazas ||--o{ plaza_assignments : "team"
     plazas ||--o{ tasks : "optional scope"
-    users ||--o{ company_assignments : "HEAD_OFFICE"
+    users ||--o{ head_office_memberships : "HEAD_OFFICE"
     users ||--o{ project_assignments : "project manager"
     users ||--o{ plaza_assignments : "Toll/Maint/Corridor"
     users ||--o{ tasks : "assignee"
@@ -38,6 +42,7 @@ erDiagram
         string passwordHash
         boolean isAdmin "platform admin flag"
         boolean active
+        string officeId FK "nullable"
     }
     companies {
         string id PK
@@ -67,10 +72,23 @@ erDiagram
         string ro "nullable"
         boolean active "soft archive only"
     }
-    company_assignments {
-        string companyId FK_PK
+    offices {
+        string id PK
+        string name UK "Delhi / Mumbai"
+        string city "nullable"
+        boolean active
+    }
+    departments {
+        string id PK
+        string name UK "Finance & Accounts"
+        string code UK "FIN"
+        int sortOrder "catalogue order"
+        boolean active
+    }
+    head_office_memberships {
         string userId FK_PK
-        CompanyRole role "HEAD_OFFICE"
+        string departmentId FK_PK
+        boolean isPrimary "exactly one per user with memberships (API + partial index)"
         string assignedById "nullable"
         datetime assignedAt
     }
@@ -150,12 +168,23 @@ erDiagram
 ### People and companies
 
 * **User** — login identity (`email` unique), display name, optional phone,
-  bcrypt `passwordHash`, `isAdmin`, `active`. Deactivating sets `active=false`;
-  users are never deleted, so task history keeps its actor/assignee joins.
+  bcrypt `passwordHash`, `isAdmin`, `active`, and a nullable `officeId` (the
+  office the person sits in). Deactivating sets `active=false`; users are never
+  deleted, so task history keeps its actor/assignee joins.
 * **Company** — `name` and `code` are unique; `active` soft-archives.
-* **CompanyAssignment** — `@@id([companyId, userId])`; grants Head Office
-  visibility over every project in that company. `role` is always
-  `CompanyRole.HEAD_OFFICE`, so the company is the access scope.
+* **Department** — global Head Office catalogue shared by every company:
+  `name` and `code` are unique, `sortOrder` drives display order, `active`
+  retires a department from new memberships. Departments are organisational
+  metadata only — they do **not** gate visibility, task permissions, project
+  management or reopen approval.
+* **Office** — where a person sits (`Delhi`, `Mumbai`); `name` is unique,
+  `city` is optional, `active` is a display flag.
+* **HeadOfficeMembership** — `@@id([userId, departmentId])`; holding any row
+  makes the person Head Office across **every** company — there is no
+  per-company row. `isPrimary` marks the department shown in the header; a
+  person with memberships always has **exactly one** primary row, maintained by
+  the membership API and backed by the partial unique index below.
+  `assignedById` records who granted the membership.
 * **Project** — belongs to exactly one company (`onDelete: Restrict`).
   `@@unique([companyId, name])` makes the name canonical within a company.
   `acronym` is nullable, non-unique, indexed, and used for display/search only —
@@ -204,7 +233,6 @@ erDiagram
 
 | Enum | Values |
 |---|---|
-| `CompanyRole` | `HEAD_OFFICE` |
 | `PlazaRole` | `TOLL`, `MAINTENANCE`, `CORRIDOR` |
 | `Round` | `ROUND_1`, `ROUND_2`, `ROUND_3`, `ROUND_4` |
 | `TaskStatus` | `TODO`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED` |
@@ -219,13 +247,36 @@ erDiagram
 | Company deletion is blocked while projects exist | `Project.company` → `onDelete: Restrict` |
 | Project deletion is blocked while plazas or tasks exist | `Plaza.project`, `Task.project` → `Restrict` |
 | Plaza deletion is blocked while tasks exist | `Task.plaza` → `Restrict` |
-| Assignments vanish with their user/company/project/plaza | assignment relations → `Cascade` |
+| Head Office memberships vanish with their user or department | `HeadOfficeMembership.user` / `.department` → `Cascade` |
+| Project/plaza assignments vanish with their user/project/plaza | assignment relations → `Cascade` |
+| Deleting an office keeps its people and clears their office | `User.office` → `SetNull` |
+| Exactly one primary department per person with memberships | `POST`/`PUT`/`DELETE` + partial unique index `HeadOfficeMembership_userId_primary_key` |
 | Task history/attachments/reopen rows vanish only with the task | `Task` children → `Cascade` |
 | Deleting a category keeps tasks | `Task.category` → `SetNull` |
 | One pending reopen request per task | partial unique index shown above |
 | Project names unique per company; plaza names unique per project | `@@unique([companyId, name])`, `@@unique([projectId, name])` |
 | Archived, not completed | `Project.active` / `Plaza.active` booleans only |
 | No account role column | access derived from `isAdmin` + assignment rows |
+
+The Head Office primary rule is hand-written in the migration because Prisma
+cannot express a partial unique index:
+
+```sql
+CREATE UNIQUE INDEX "HeadOfficeMembership_userId_primary_key"
+  ON "HeadOfficeMembership"("userId") WHERE "isPrimary";
+```
+
+It permits at most one primary row per user; the API maintains **exactly one**
+for anyone who holds memberships, inside a transaction on every write:
+`POST` makes the first membership (or an explicit `isPrimary`) primary and
+clears the others; `PUT` promoting a department clears the old primary, while
+demoting the current primary promotes the remaining membership with the lowest
+`department.sortOrder` (demoting the only membership is refused with 400);
+`DELETE` of the primary promotes the remaining membership with the lowest
+`sortOrder`. The seed always gives a person with departments exactly one
+primary. Removing a person's
+**last** membership is allowed and demotes them out of Head Office (to their
+project/plaza assignments, or no access); an Admin can always re-grant it.
 
 ## Access rules
 
@@ -238,8 +289,8 @@ erDiagram
 | Plazas | all | all | all plazas in assigned projects | assigned plazas only |
 | Tasks | all | all | all tasks in assigned projects (incl. project-level) | tasks in assigned plazas + project-level tasks assigned to them |
 
-* Head Office is company-scoped by assignment but the helper currently grants
-  Admin/HO visibility across every company.
+* Head Office is global by design: one department membership grants every
+  company, project, plaza and task. Departments and offices never narrow access.
 * A site manager assigned a **project-level task** can read/act on that task even
   without a plaza on that project, but the project/plaza pages still require a
   project or plaza assignment (`requireProjectAccess` / `requirePlazaAccess`).
@@ -252,15 +303,18 @@ For any task, role precedence is **Admin > Head Office > Project Manager >
 Site Manager** (`effectiveTaskRole`):
 
 1. `User.isAdmin` → `ADMIN`.
-2. `CompanyAssignment` on the task's project company → `HEAD_OFFICE`.
+2. Any `HeadOfficeMembership` → `HEAD_OFFICE` (global; no company/project check).
 3. `ProjectAssignment` on the task's project → `PROJECT_MANAGER`.
 4. `PlazaAssignment` on the task's plaza → `SITE_MANAGER`.
 5. No plaza on the task and `assigneeId === user.id` → `SITE_MANAGER` (the
    project-level fallback).
 
 The derived display role for navigation uses `isAdmin ? ADMIN :
-companyAssignment ? HEAD_OFFICE : PROJECT_MANAGER`; site managers roll up to the
-Project Manager shell and get their job titles from plaza assignments.
+headOfficeMemberships.length > 0 ? HEAD_OFFICE : PROJECT_MANAGER`; the header
+badge reads `Head Office · <primary department>` (e.g. `Head Office ·
+Secretarial`). Site managers roll up to the Project Manager shell and get their
+job titles from plaza assignments. Departments are display and organisational
+metadata only — they do not change any role, capability or approval.
 
 ### Capabilities
 
@@ -268,7 +322,7 @@ Project Manager shell and get their job titles from plaza assignments.
 |---|---|---|---|---|
 | Manage companies/categories/users, deactivate users | yes | no | no | no |
 | Create/edit/archive projects and plazas | yes | yes | no | no |
-| Manage company/project/plaza assignments | yes | yes | no | no |
+| Manage Head Office memberships and project/plaza assignments | yes | yes | no | no |
 | Create tasks | any scope | any scope | assigned projects (project or plaza scope) | assigned plazas only (plaza scope) |
 | Edit task core fields | any task | any task | tasks in assigned projects | only tasks they created |
 | Change status / comment / attach | any task | any task | assigned projects | assigned plazas + assigned project-level tasks |
@@ -318,7 +372,7 @@ Source pipeline:
 ```
 docs/master-data.md
   → scripts/parse-master-data.mjs
-  → prisma/master-data.ts (typed MASTER_COMPANIES)
+  → prisma/master-data.ts (typed MASTER_COMPANIES / MASTER_DEPARTMENTS / MASTER_OFFICES)
   → prisma/seed.ts
 ```
 
@@ -331,23 +385,44 @@ Fresh seed profile (`SEED_RESET=1` wipes in FK-safe order first):
 * **28 projects**, **46 plazas** (plaza lengths come from the bracket values in
   the master data; project `lengthKm`/`piu`/`ro` stay blank because plaza
   brackets are authoritative).
-* **92 field users** from PM / Toll / Maintenance / Corridor names, plus
-  **Admin** and **Head Office** accounts (94 users total).
+* **18 Head Office departments** and **2 offices** (`Delhi`, `Mumbai`):
+  * `ADMIN` Admin, `BMS` BMS, `EHS` EHS, `FIN` Finance & Accounts,
+    `HR-LD` HR - Learning & Development, `HR-COMP` HR-Compliance,
+    `HR-RP` HR-Recruitment & Payroll, `MMR` Initial Improvement/MMR,
+    `IA` Internal Audit, `INV` Investment & Acquisitions, `IT` IT, `ITS` ITS,
+    `LEGAL` Legal, `MAINT` Maintenance, `OPS` Operations, `PROC` Procurement,
+    `SEC` Secretarial, `TREAS` Treasury.
+  * `sortOrder` follows the source list (1, 4–20); departments are global and
+    shared by all three companies.
+* **112 users**: **92 field users** from PM / Toll / Maintenance / Corridor
+  names, plus **Admin**, the C-suite account `management@tracker.local`, and
+  **18 Head Office leads** (one per department). Demo lead offices are Delhi for
+  `ADMIN, FIN, SEC, TREAS, INV, LEGAL, IA, HR-LD, HR-COMP, HR-RP` and Mumbai for
+  the rest.
+* **20 Head Office memberships**: `management@tracker.local` holds two
+  (`SEC` primary + `FIN`) and each department lead holds one (`isPrimary`).
+  There is no per-company Head Office row.
 * **6 task categories** and **41 demo tasks**: 35 plaza tasks + 6 project-level
   tasks (`plazaId = null`), with 16 `TODO`, 10 `IN_PROGRESS`, 5 `BLOCKED`, and
-  10 `COMPLETED`; `priority` cycles through `MEDIUM`, `HIGH`, `LOW`. Seeded
-  activities include `CREATED`, `ASSIGNED`, `STATUS_CHANGED`, and comments, plus
-  one `PENDING` reopen request on a completed task so the approval flow is
+  10 `COMPLETED`; `priority` cycles through `MEDIUM`, `HIGH`, `LOW`. The seed
+  writes **122 activities** (`CREATED`, `ASSIGNED`, `STATUS_CHANGED`, comments)
+  and one `PENDING` reopen request on a completed task so the approval flow is
   visible immediately.
-* Head Office is assigned `HEAD_OFFICE` on all three companies; PM/site access
-  comes from generated project and plaza assignments.
+* PM/site access comes from generated project and plaza assignments; Head Office
+  access comes solely from the department memberships above.
+
+The `20261023000000_head_office_departments` migration backfilled former Head
+Office users into the `Admin` department (primary, Delhi office) and kept the old
+rows in `_CompanyAssignment_backup` (3 rows) for the pilot; a later migration
+drops that backup table.
 
 ### Logins
 
 | Account | Email | Password |
 |---|---|---|
 | Admin | `admin@tracker.local` | `Admin@123` |
-| Head Office | `management@tracker.local` (override: `SEED_MANAGEMENT_EMAIL`) | `Manage@123` (override: `SEED_MANAGEMENT_PASSWORD`) |
+| Head Office (C-suite) | `management@tracker.local` (override: `SEED_MANAGEMENT_EMAIL`) — primary Secretarial, also Finance & Accounts, Delhi office | `Manage@123` (override: `SEED_MANAGEMENT_PASSWORD`) |
+| Head Office leads (18) | `dept.<code-lower>@tracker.local`, e.g. `dept.admin@tracker.local`, `dept.fin@tracker.local`, `dept.hr-ld@tracker.local`, `dept.sec@tracker.local`, `dept.treas@tracker.local` — one primary department each | `Manage@123` |
 | Field users | slugified name `@tracker.local` (duplicates get `.2`, `.3`, …) | `Tracker@123` |
 
 Field logins are generated from the person's name, e.g.

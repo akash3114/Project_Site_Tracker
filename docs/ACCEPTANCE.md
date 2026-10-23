@@ -1,27 +1,30 @@
 # ACCEPTANCE — Project Site Tracker Pilot
 
 > Source of truth: `docs/DATABASE.md`. Hierarchy: **Company → Project → Plaza**.
-> Seed: 3 companies / 28 projects / 46 plazas / 94 users / 41 tasks.
+> Seed: 3 companies / 28 projects / 46 plazas / 18 departments / 2 offices / 112 users / 41 tasks.
 
-Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/46/94/41
+Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/46/18/2/112/41
 
 ## A. Automated (must all be green)
 - [ ] `npm.cmd run lint` clean
 - [ ] `npm.cmd exec -- prisma validate` OK
 - [ ] `npx.cmd tsc --noEmit` clean
 - [ ] `npm.cmd run build` succeeds
-- [ ] `node scripts/smoke-api.mjs` — 23/23 (run against a dev server; `SMOKE_BASE_URL` to change it)
+- [ ] `node scripts/smoke-api.mjs` — 40/40 (run against a dev server; `SMOKE_BASE_URL` to change it)
 - [ ] `docker compose -f docker/compose.yml up -d --build` + `/api/health` 200
 
 ## B. Access model (Admin | Head Office | Project Manager | Site Manager)
-- [ ] Admin creates a user and assigns **Head Office** on a company → the user sees every company/project in the portfolio
+- [ ] Admin adds a **Head Office department membership** (Access page) → the user sees every company/project in the portfolio and the header badge reads `Head Office · <department>` (e.g. `Head Office · Secretarial`)
 - [ ] Admin/Head Office assigns a **Project Manager** on a project → the user sees the project and all its plazas and can create project- and plaza-level tasks
 - [ ] Admin/Head Office assigns **Toll (primary) / Maintenance / Corridor** roles per plaza → the user sees only those plazas
 - [ ] A site manager sees a project-level task only when assigned to it
-- [ ] Revoking a company/project/plaza assignment removes the corresponding access immediately
-- [ ] `HEAD_OFFICE` can manage projects, plazas, categories and assignments, but cannot open **Admin → Users**
+- [ ] Revoking a project/plaza assignment removes the corresponding access immediately; removing a department membership drops the user out of Head Office, including when it is their **last** membership (role falls back to project manager / plaza scope)
+- [ ] Department membership is global: an HO user whose primary department is Treasury can open a task in every company (NEPPL, NSPPL, NWPPL); changing their primary department changes only the header badge, not access
+- [ ] Choosing a department or changing the primary never changes project management, task or reopen-approval permissions; the department membership itself is the Head Office grant
+- [ ] `HEAD_OFFICE` can manage projects, plazas and Head Office memberships, but cannot open **Admin → Users**
 - [ ] A Project Manager/site manager cannot create or archive projects/plazas, manage users, or reopen a task directly
 - [ ] A person holding multiple assignments sees the union of their scopes; effective role is Admin > HO > PM > site manager
+- [ ] Admin → Users shows Department and Office for Head Office people; the Access page groups HO members by department and can add/remove a membership with the role flipping on the next request (no re-login)
 
 ## C. Task workflow
 - [ ] Project-level task created → visible to Admin/HO/PM; site managers see it only when assigned

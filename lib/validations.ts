@@ -69,9 +69,18 @@ export const updateUserSchema = z.object({
   password: z.string().min(6).optional(),
 });
 
-export const companyAssignmentSchema = z.object({
-  companyId: z.string().cuid(),
-  userId: z.string().cuid(),
+// Department ids can be non-cuid (e.g. `dept_admin` from the migration), so
+// these schemas validate presence only.
+export const headOfficeMembershipSchema = z.object({
+  userId: z.string().min(1),
+  departmentId: z.string().min(1),
+  isPrimary: z.boolean().default(false),
+});
+
+export const headOfficeMembershipUpdateSchema = z.object({
+  userId: z.string().min(1),
+  departmentId: z.string().min(1),
+  isPrimary: z.boolean(),
 });
 
 export const projectAssignmentSchema = z.object({

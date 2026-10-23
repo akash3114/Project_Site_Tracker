@@ -12,10 +12,15 @@ datasource db {
 //
 // There is no fixed account role. Access is derived from assignments:
 //   - User.isAdmin                    -> platform administrator
-//   - CompanyAssignment(HEAD_OFFICE)  -> head office, all projects in company
+//   - HeadOfficeMembership            -> head office, all projects everywhere
 //   - ProjectAssignment(PROJECT_MANAGER) -> project manager
 //   - PlazaAssignment(TOLL|MAINTENANCE|CORRIDOR) -> site manager
 // A person may hold several assignments at once.
+//
+// Head Office is an internal dimension, not a scope level under Company:
+// departments are organisational metadata only and gate nothing. Each person
+// with a department holds exactly one primary department (partial unique
+// index, see the migration). Office is where the person sits.
 // ---------------------------------------------------------------------------
 
 model User {
@@ -29,9 +34,12 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  companyAssignments CompanyAssignment[]
-  projectAssignments ProjectAssignment[]
-  plazaAssignments   PlazaAssignment[]
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
+
+  headOfficeMemberships HeadOfficeMembership[]
+  projectAssignments    ProjectAssignment[]
+  plazaAssignments      PlazaAssignment[]
 
   assignedTasks  Task[] @relation("Assignee")
   createdTasks   Task[] @relation("Creator")
@@ -59,29 +67,54 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  projects    Project[]
-  assignments CompanyAssignment[]
+  projects Project[]
 
   @@index([active])
 }
 
-model CompanyAssignment {
-  companyId    String
-  userId       String
-  role         CompanyRole @default(HEAD_OFFICE)
-  assignedById String?
-  assignedAt   DateTime    @default(now())
+// ---------------------------------------------------------------------------
+// Head Office structure
+//
+// A department membership IS the Head Office grant. Departments are a global
+// catalogue shared by every company and affect permissions not at all.
+// ---------------------------------------------------------------------------
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique // "Finance & Accounts"
+  code      String   @unique // "FIN"
+  sortOrder Int      @default(0) // Sr.No. from the source list
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@id([companyId, userId])
-  @@index([companyId])
-  @@index([userId])
+  members HeadOfficeMembership[]
+
+  @@index([active])
 }
 
-enum CompanyRole {
-  HEAD_OFFICE
+model Office {
+  id        String   @id @default(cuid())
+  name      String   @unique // "Delhi"
+  city      String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  users User[]
+}
+
+model HeadOfficeMembership {
+  userId       String
+  departmentId String
+  isPrimary    Boolean  @default(false)
+  assignedById String?
+  assignedAt   DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, departmentId])
+  @@index([departmentId])
 }
 
 model Project {
