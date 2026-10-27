@@ -138,6 +138,17 @@ async function main(): Promise<void> {
     await db.department.deleteMany();
   }
 
+  // Seed assumes a fresh DB; skip (rather than crash) when data already
+  // exists. SEED_RESET=1 above is the explicit wipe-and-rebuild path.
+  const seededBefore = (await db.user.count()) > 0;
+  if (seededBefore && process.env.SEED_RESET !== "1") {
+    // eslint-disable-next-line no-console
+    console.log(
+      "Seed skipped: database already contains users. Set SEED_RESET=1 to wipe and re-seed.",
+    );
+    return;
+  }
+
   // ---- Head Office catalogue --------------------------------------------
   // Upserted by their natural keys: the migration already created Admin /
   // Delhi / Mumbai with fixed ids and the backfilled memberships point at

@@ -39,8 +39,8 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-change-me}
     command: npx prisma migrate deploy
 
-  # One-shot: idempotent seed (upserts master data + users), then exits.
-  # Set SEED_RESET=1 in .env to wipe and re-seed (destructive).
+  # One-shot seed: wipes and rebuilds demo data when SEED_RESET=1; skips
+  # cleanly when data already exists. Exits in either case.
   seed:
     build:
       context: .
