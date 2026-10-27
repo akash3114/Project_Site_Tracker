@@ -242,7 +242,7 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
   );
 }
 
-function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
+export function ProjectRegister({ projects }: { projects: ProjectSummary[] }) {
   const [query, setQuery] = useState("");
   const [round, setRound] = useState("all");
   const filtered = useMemo(() => projects.filter((project) => {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser, requireTaskAccess } from "@/lib/access";
 import { db } from "@/lib/db";
+import { taskInclude } from "@/lib/task-data";
 import { canTransition } from "@/lib/transitions";
 import { statusSchema } from "@/lib/validations";
 
@@ -47,6 +48,7 @@ export async function POST(
             ? { completedAt: new Date(), completedById: user.id }
             : { completedAt: null, completedById: null }),
         },
+        include: taskInclude,
       });
       await tx.taskActivity.create({
         data: {
