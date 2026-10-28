@@ -1,6 +1,6 @@
 # Project Site Tracker (Pilot)
 
-Web app to track toll-plaza site work across companies: `Company → Project → Plaza → Task → Activity feed`, one assignee per task, no task deletion, full audit trail. Managers are real login users; job titles (Project Manager / Toll / Maintenance / Corridor) live on assignment rows.
+Web app to track toll-plaza site work across companies: `Company → Project → Plaza → Task → Activity feed`, plus Head Office work scoped to a department, one assignee per task, no task deletion, full audit trail. Managers are real login users; job titles (Project Manager / Toll / Maintenance / Corridor) live on assignment rows, and Head Office people can carry an optional free-text job title (`User.title`) used as their assignee label.
 
 Stack: Next.js 14 App Router + TypeScript + Tailwind + shadcn/ui + Prisma 6 + PostgreSQL 16 + Auth.js v5 (email/password).
 
@@ -14,9 +14,11 @@ Access is assignment-based; a person may hold several roles and scopes. Head Off
 | Account type | Shows as | Can |
 |---|---|---|
 | `ADMIN` | Admin | Everything: users (create / password reset / deactivate), companies, projects, plazas, categories, Head Office memberships, PM/plaza assignments, tasks, reopen approvals, audit |
-| `HEAD_OFFICE` | Head Office | All companies, via any department membership. Organised into 18 departments (Admin, Finance & Accounts, Secretarial, Treasury, IT, …) with an office (Delhi/Mumbai); the department is display/organisation only and does not change permissions. Projects, plazas, Head Office memberships, PM/plaza assignments, tasks, reopen approvals, audit (no user management) |
+| `HEAD_OFFICE` | Head Office | All companies, via any department membership. Organised into 18 departments (Admin, Finance & Accounts, Secretarial, Treasury, IT, …) with an office (Delhi/Mumbai); the department is display/organisation only and does not change permissions, but it is also a task location (department or Head Office-level tasks). Projects, plazas, Head Office memberships, PM/plaza assignments, tasks, reopen approvals, audit (no user management) |
 | `PROJECT_MANAGER` (project assignment) | Project Manager | Assigned projects: project- and plaza-level tasks, assignment within the project; can request (not directly perform) reopen |
-| `PROJECT_MANAGER` (plaza assignment only) | Plaza job title(s) held | Assigned plazas and assigned project-level tasks: tasks and statuses; can request (not directly perform) reopen |
+| `PROJECT_MANAGER` (plaza assignment only) | Plaza job title(s) held | Assigned plazas and assigned project-level or Head Office tasks: tasks and statuses; can request (not directly perform) reopen |
+
+A task's scope is a project (optionally one plaza), a department, or Head Office level (no project, no department). The management composer can create one task across several scopes at once; PMs and site managers only see Head Office tasks when they are the assignee, and cannot reassign them.
 
 Users are never deleted (deactivate only). Tasks and events are never deleted.
 
@@ -29,7 +31,7 @@ copy .env.example .env               # then set DATABASE_URL + AUTH_SECRET
 npm.cmd install
 docker compose -f docker/compose.dev.yml up -d db
 npm.cmd exec -- prisma migrate dev
-npm.cmd exec -- tsx prisma/seed.ts   # master data: 3 companies / 28 projects / 46 plazas / 18 departments / 2 offices / 112 users / 41 tasks
+npm.cmd exec -- tsx prisma/seed.ts   # master data: 3 companies / 28 projects / 46 plazas / 18 departments / 2 offices / 112 users / 47 tasks
 npm.cmd run dev                      # http://localhost:3000/login
 ```
 
@@ -45,7 +47,7 @@ Rotate the shared `Tracker@123` before handing logins out. Wipe-and-reseed with 
 ## Scripts
 
 - `npm.cmd run lint`, `npm.cmd exec -- tsc --noEmit`, `npm.cmd run build`
-- `node scripts/smoke-api.mjs` (40 runtime checks; needs dev server on `:3000`, set `SMOKE_BASE_URL` to change it)
+- `node scripts/smoke-api.mjs` (50 runtime checks; needs dev server on `:3000`, set `SMOKE_BASE_URL` to change it)
 - `node scripts/parse-master-data.mjs` (regenerates `prisma/master-data.ts` from `docs/master-data.md`)
 - `npm.cmd run reset-admin -- <email> [password]`
 - `npm.cmd run rotate-managers -- <password>` (bulk reset all field-user logins)

@@ -7,8 +7,10 @@ import {
   ROUND_LABELS,
   ROUND_ORDER,
   isCompleted,
+  isHeadOfficeTask,
   projectIdOf,
   statusOf,
+  type MgmtDepartment,
   type MgmtProject,
   type MgmtTask,
   type RoundKey,
@@ -28,30 +30,37 @@ const BUCKET_LABELS: Record<Bucket, string> = {
   NONE: "No round",
 };
 
+/** Departments shown before the rail asks whether to expand. */
+const VISIBLE_DEPARTMENTS = 6;
+
 export type PortfolioRailProps = {
   projects: MgmtProject[];
+  departments: MgmtDepartment[];
   tasks: MgmtTask[];
   plazaCount: number;
-  selectedProjectId: string | null;
-  /** The parent toggles: passing the selected id again clears the filter. */
-  onSelectProject: (id: string | null) => void;
+  /** Scope keys (`project:<id>`, `department:<id>`, `head-office`, …). */
+  selectedScopes: string[];
+  /** The parent toggles: passing an active key again clears it. */
+  onToggleScope: (key: string) => void;
   onViewAll: () => void;
 };
 
 /**
- * Compact portfolio register beside the canvas. Clicking a project filters the
- * tasks in place; the arrow opens the full project page.
+ * Compact portfolio register beside the canvas. Head Office departments sit
+ * pinned above the round groups; clicking any row filters the tasks in place.
+ * The arrow opens the full project page.
  */
 export function PortfolioRail({
   projects,
+  departments,
   tasks,
-  plazaCount,
-  selectedProjectId,
-  onSelectProject,
+  selectedScopes,
+  onToggleScope,
   onViewAll,
 }: PortfolioRailProps) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<Bucket>>(new Set());
+  const [showAllDepartments, setShowAllDepartments] = useState(false);
 
   const stats = useMemo(() => {
     const byProject = new Map<
@@ -85,6 +94,27 @@ export function PortfolioRail({
     [tasks],
   );
 
+  const headOffice = useMemo(() => {
+    const rows = tasks.filter(isHeadOfficeTask);
+    return {
+      total: rows.length,
+      open: rows.filter((task) => !isCompleted(task)).length,
+    };
+  }, [tasks]);
+
+  const activeDepartments = useMemo(
+    () =>
+      departments
+        .filter((department) => department.active !== false)
+        .slice()
+        .sort(
+          (a, b) =>
+            (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+            a.name.localeCompare(b.name),
+        ),
+    [departments],
+  );
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return projects;
@@ -94,6 +124,20 @@ export function PortfolioRail({
         .includes(needle),
     );
   }, [projects, query]);
+
+  const filteredDepartments = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return activeDepartments;
+    return activeDepartments.filter((department) =>
+      `${department.name} ${department.code ?? ""}`
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [activeDepartments, query]);
+
+  const shownDepartments = showAllDepartments
+    ? filteredDepartments
+    : filteredDepartments.slice(0, VISIBLE_DEPARTMENTS);
 
   const groups = useMemo(() => {
     const byRound = new Map<Bucket, MgmtProject[]>();
@@ -121,24 +165,111 @@ export function PortfolioRail({
     });
   }
 
+  const headOfficeSelected = selectedScopes.includes("head-office");
+
   return (
     <aside className="mgmt-rail" aria-label="Portfolio">
       <div className="mgmt-rail-head">
         <h2 className="mgmt-rail-title">Portfolio</h2>
         <span className="mgmt-rail-stats">
-          {projects.length} projects · {plazaCount} plazas · {openCount} open
+          {projects.length} projects · {activeDepartments.length} departments ·{" "}
+          {openCount} open
         </span>
         <input
           className="mgmt-rail-search"
           type="search"
-          placeholder="Find a project"
-          aria-label="Find a project"
+          placeholder="Find a project or department"
+          aria-label="Find a project or department"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
 
       <div className="mgmt-rail-scroll">
+        <div className="mgmt-rail-ho" data-ho="true">
+          <div className="mgmt-rail-ho-head">
+            <span className="mgmt-rail-group-label">Head Office</span>
+            <span className="mgmt-rail-group-count">
+              {activeDepartments.length}
+            </span>
+          </div>
+
+          <div
+            className="mgmt-rail-ho-row"
+            data-selected={headOfficeSelected ? "true" : "false"}
+          >
+            <button
+              type="button"
+              className="mgmt-rail-ho-main"
+              aria-pressed={headOfficeSelected}
+              title="All Head Office — filter tasks"
+              onClick={() => onToggleScope("head-office")}
+            >
+              <span className="mgmt-rail-acronym">HO</span>
+              <span className="mgmt-rail-copy">
+                <span className="mgmt-rail-name">All Head Office</span>
+                <span className="mgmt-rail-meta">
+                  {headOffice.open} open · {headOffice.total} tasks
+                </span>
+              </span>
+            </button>
+          </div>
+
+          {shownDepartments.map((department) => {
+            const key = `department:${department.id}`;
+            const selected = selectedScopes.includes(key);
+            const percent = Math.max(
+              0,
+              Math.min(100, department.progressPct ?? 0),
+            );
+            return (
+              <div
+                key={department.id}
+                className="mgmt-rail-ho-row"
+                data-selected={selected ? "true" : "false"}
+              >
+                <button
+                  type="button"
+                  className="mgmt-rail-ho-main"
+                  aria-pressed={selected}
+                  title={`${department.name} — filter tasks`}
+                  onClick={() => onToggleScope(key)}
+                >
+                  <span className="mgmt-rail-acronym">
+                    {department.code?.trim() || "—"}
+                  </span>
+                  <span className="mgmt-rail-copy">
+                    <span className="mgmt-rail-name">{department.name}</span>
+                    <span className="mgmt-rail-meta">
+                      {department.memberCount ?? 0} members ·{" "}
+                      {department.open ?? 0} open
+                    </span>
+                  </span>
+                </button>
+                <span
+                  className="mgmt-rail-progress mgmt-rail-ho-progress"
+                  aria-hidden="true"
+                >
+                  <i style={{ width: `${percent}%` }} />
+                </span>
+              </div>
+            );
+          })}
+
+          {filteredDepartments.length > VISIBLE_DEPARTMENTS ? (
+            <button
+              type="button"
+              className="mgmt-rail-ho-more"
+              aria-expanded={showAllDepartments}
+              onClick={() => setShowAllDepartments((value) => !value)}
+            >
+              {showAllDepartments
+                ? "Show fewer departments"
+                : `Show all ${filteredDepartments.length} departments`}
+            </button>
+          ) : null}
+        </div>
+
         {groups.map((group) => {
           const isCollapsed = collapsed.has(group.key);
           return (
@@ -170,7 +301,9 @@ export function PortfolioRail({
                   const percent = entry.total
                     ? Math.round((entry.completed / entry.total) * 100)
                     : 0;
-                  const selected = selectedProjectId === project.id;
+                  const selected = selectedScopes.includes(
+                    `project:${project.id}`,
+                  );
                   return (
                     <div
                       key={project.id}
@@ -182,7 +315,7 @@ export function PortfolioRail({
                         className="mgmt-rail-row-main"
                         aria-pressed={selected}
                         title={`${project.name} — filter tasks`}
-                        onClick={() => onSelectProject(project.id)}
+                        onClick={() => onToggleScope(`project:${project.id}`)}
                       >
                         <span className="mgmt-rail-acronym">
                           {project.acronym?.trim() || "—"}
@@ -236,7 +369,7 @@ export function PortfolioRail({
           );
         })}
 
-        {groups.length === 0 ? (
+        {groups.length === 0 && filteredDepartments.length === 0 ? (
           <p className="mgmt-rail-empty">No projects match “{query}”.</p>
         ) : null}
       </div>

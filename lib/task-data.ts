@@ -31,6 +31,9 @@ export const taskInclude = {
     },
   },
   category: { select: { id: true, name: true } },
+  department: {
+    select: { id: true, name: true, code: true, sortOrder: true },
+  },
   assignee: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   completedBy: { select: { id: true, name: true } },
@@ -83,14 +86,25 @@ export function taskPermissions(
   user: SessionUser,
   task: Pick<
     Task,
-    "status" | "projectId" | "plazaId" | "assigneeId" | "createdById"
+    | "status"
+    | "projectId"
+    | "plazaId"
+    | "departmentId"
+    | "assigneeId"
+    | "createdById"
   >,
   role: ScopeRole,
 ): TaskPermissions {
   return {
     canEdit: canEditTaskCore(user, task, role),
     canChangeStatus: canChangeTaskStatus(task, role),
-    canAssign: task.status !== "COMPLETED",
+    // Head Office tasks (department or Head Office level) may only be
+    // (re)assigned by Admin or HO. Project tasks keep the existing ceiling.
+    canAssign:
+      task.status !== "COMPLETED" &&
+      ((task.departmentId === null && task.projectId !== null) ||
+        role === "ADMIN" ||
+        role === "HEAD_OFFICE"),
     canReopenDirect: task.status === "COMPLETED" && canReopenDirectly(role),
     canRequestReopen: canRequestReopen(task, role),
     canApproveReopen: canApproveReopen(role),

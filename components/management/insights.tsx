@@ -11,8 +11,10 @@ import {
   STATUS_TONES,
   countStatuses,
   isCompleted,
+  isHeadOfficeTask,
   projectIdOf,
   statusOf,
+  type MgmtDepartment,
   type MgmtPlaza,
   type MgmtProject,
   type MgmtStatus,
@@ -155,10 +157,16 @@ export type InsightsProps = {
   tasks: MgmtTask[];
   projects: MgmtProject[];
   plazas: MgmtPlaza[];
+  departments?: MgmtDepartment[];
 };
 
 /** Portfolio diagnosis: what the task canvas deliberately keeps off the fold. */
-export function Insights({ tasks, projects, plazas }: InsightsProps) {
+export function Insights({
+  tasks,
+  projects,
+  plazas,
+  departments = [],
+}: InsightsProps) {
   const now = useMemo(() => new Date(), []);
   const statusCounts = useMemo(() => countStatuses(tasks), [tasks]);
   const total = tasks.length;
@@ -238,6 +246,41 @@ export function Insights({ tasks, projects, plazas }: InsightsProps) {
       .slice(0, 5);
   }, [projects, tasks]);
 
+  const headOffice = useMemo(() => {
+    const rows = tasks.filter(isHeadOfficeTask);
+    const total = rows.length;
+    const completed = rows.filter(isCompleted).length;
+    const blocked = rows.filter((task) => statusOf(task) === "BLOCKED").length;
+    const late = rows.filter(
+      (task) => !isCompleted(task) && isOverdue(task.dueDate, task.status),
+    ).length;
+    const active = departments.filter(
+      (department) => department.active !== false,
+    );
+    return {
+      total,
+      open: total - completed,
+      completed,
+      blocked,
+      overdue: late,
+      progressPct: total ? Math.round((completed / total) * 100) : 0,
+      departments: active
+        .slice()
+        .sort(
+          (a, b) =>
+            (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+            a.name.localeCompare(b.name),
+        ),
+      members: active.reduce(
+        (sum, department) => sum + (department.memberCount ?? 0),
+        0,
+      ),
+    };
+  }, [departments, tasks]);
+
+  const showHeadOffice =
+    headOffice.total > 0 || headOffice.departments.length > 0;
+
   return (
     <div className="mgmt-insights">
       <div className="mgmt-insight-metrics" role="group" aria-label="Portfolio summary">
@@ -315,6 +358,87 @@ export function Insights({ tasks, projects, plazas }: InsightsProps) {
             </div>
           )}
         </section>
+
+        {showHeadOffice ? (
+          <section
+            className="mgmt-insight-card mgmt-insight-ho"
+            aria-label="Head Office departments"
+          >
+            <div className="mgmt-insight-head">
+              <h2>Head Office</h2>
+              <span>
+                {headOffice.departments.length} departments ·{" "}
+                {headOffice.members} members
+              </span>
+            </div>
+
+            <div className="mgmt-insight-ho-grid">
+              <div className="mgmt-insight-ho-stat">
+                <span>Total</span>
+                <strong>{headOffice.total}</strong>
+              </div>
+              <div className="mgmt-insight-ho-stat">
+                <span>Open</span>
+                <strong>{headOffice.open}</strong>
+              </div>
+              <div className="mgmt-insight-ho-stat">
+                <span>Completed</span>
+                <strong>{headOffice.completed}</strong>
+              </div>
+              <div className="mgmt-insight-ho-stat">
+                <span>Blocked</span>
+                <strong>{headOffice.blocked}</strong>
+              </div>
+              <div className="mgmt-insight-ho-stat">
+                <span>Overdue</span>
+                <strong>{headOffice.overdue}</strong>
+              </div>
+              <div className="mgmt-insight-ho-stat">
+                <span>Progress</span>
+                <strong>{headOffice.progressPct}%</strong>
+              </div>
+            </div>
+
+            <span
+              className="mgmt-insight-ho-bar"
+              data-tone="overall"
+              aria-hidden="true"
+            >
+              <i style={{ width: `${headOffice.progressPct}%` }} />
+            </span>
+
+            {headOffice.departments.length === 0 ? (
+              <p className="mgmt-empty">No active departments.</p>
+            ) : (
+              <div className="mgmt-insight-ho-list">
+                {headOffice.departments.map((department) => {
+                  const percent = Math.max(
+                    0,
+                    Math.min(100, department.progressPct ?? 0),
+                  );
+                  return (
+                    <div className="mgmt-insight-ho-row" key={department.id}>
+                      <span className="mgmt-insight-ho-name">
+                        {department.name}
+                      </span>
+                      <span className="mgmt-insight-ho-meta">
+                        {department.memberCount ?? 0} members ·{" "}
+                        {department.open ?? 0} open
+                      </span>
+                      <span
+                        className="mgmt-insight-ho-bar"
+                        aria-hidden="true"
+                      >
+                        <i style={{ width: `${percent}%` }} />
+                      </span>
+                      <strong>{percent}%</strong>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : null}
       </div>
     </div>
   );

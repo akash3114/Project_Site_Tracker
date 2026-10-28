@@ -1,5 +1,7 @@
 "use client";
 
+import { AssigneePicker } from "@/components/management/assignee-picker";
+
 export type TaskStatusFilter =
   | "TODO"
   | "IN_PROGRESS"
@@ -16,7 +18,17 @@ export type TaskFilters = {
   q?: string;
 };
 
-export type AssigneeOption = { id: string; name: string };
+export type AssigneeOption = {
+  id: string;
+  name: string;
+  role?: "ADMIN" | "HEAD_OFFICE" | "PROJECT_MANAGER" | "SITE_MANAGER" | null;
+  title?: string | null;
+  roleLabel?: string | null;
+  contextLabel?: string | null;
+  department?: string | null;
+  office?: string | null;
+  search?: string | null;
+};
 export type CategoryOption = {
   id: string;
   name: string;
@@ -123,21 +135,15 @@ export function TaskFiltersBar({
           ))}
         </select>
       ) : null}
-      <select
-        aria-label="Filter by assignee"
-        value={filters.assigneeId ?? ""}
-        onChange={(e) =>
-          onChange({ ...filters, assigneeId: e.target.value || undefined })
+      <AssigneePicker
+        candidates={assignees}
+        value={filters.assigneeId ?? null}
+        onChange={(id) =>
+          onChange({ ...filters, assigneeId: id ?? undefined })
         }
-        className={selectClass()}
-      >
-        <option value="">All assignees</option>
-        {assignees.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.name}
-          </option>
-        ))}
-      </select>
+        placeholder="All assignees"
+        scopeKind={null}
+      />
       <button
         type="button"
         aria-pressed={filters.overdueOnly ?? false}

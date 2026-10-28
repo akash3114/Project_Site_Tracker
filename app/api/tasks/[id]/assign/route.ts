@@ -6,6 +6,8 @@ import {
   requireTaskAccess,
 } from "@/lib/access";
 import { db } from "@/lib/db";
+import { taskPermissions } from "@/lib/task-data";
+import type { TaskScope } from "@/lib/task-scope";
 import { assignSchema } from "@/lib/validations";
 
 /** POST /api/tasks/:id/assign → change or clear the assignee. */
@@ -35,15 +37,18 @@ export async function POST(
       );
     }
 
-    if (
-      assigneeId &&
-      !(await canAssignTo(
-        access.role,
-        access.task.projectId,
-        access.task.plazaId,
-        assigneeId,
-      ))
-    ) {
+    const permissions = taskPermissions(user, access.task, access.role);
+    if (!permissions.canAssign) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { projectId, plazaId, departmentId } = access.task;
+    const scope: TaskScope =
+      departmentId !== null || projectId === null
+        ? { kind: "department", departmentId }
+        : { kind: "project", projectId, plazaId };
+
+    if (assigneeId && !(await canAssignTo(access.role, scope, assigneeId))) {
       return NextResponse.json(
         { error: "That person cannot be assigned in this scope" },
         { status: 422 },

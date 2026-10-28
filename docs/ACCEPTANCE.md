@@ -1,16 +1,16 @@
 # ACCEPTANCE — Project Site Tracker Pilot
 
-> Source of truth: `docs/DATABASE.md`. Hierarchy: **Company → Project → Plaza**.
-> Seed: 3 companies / 28 projects / 46 plazas / 18 departments / 2 offices / 112 users / 41 tasks.
+> Source of truth: `docs/DATABASE.md`. Hierarchy: **Company → Project → Plaza**, plus **Head Office → Department** as a parallel task scope.
+> Seed: 3 companies / 28 projects / 46 plazas / 18 departments / 2 offices / 112 users / 47 tasks.
 
-Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/46/18/2/112/41
+Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/46/18/2/112/47
 
 ## A. Automated (must all be green)
 - [ ] `npm.cmd run lint` clean
 - [ ] `npm.cmd exec -- prisma validate` OK
 - [ ] `npx.cmd tsc --noEmit` clean
 - [ ] `npm.cmd run build` succeeds
-- [ ] `node scripts/smoke-api.mjs` — 40/40 (run against a dev server; `SMOKE_BASE_URL` to change it)
+- [ ] `node scripts/smoke-api.mjs` — 50/50 (run against a dev server; `SMOKE_BASE_URL` to change it)
 - [ ] `docker compose -f docker/compose.yml up -d --build` + `/api/health` 200
 
 ## B. Access model (Admin | Head Office | Project Manager | Site Manager)
@@ -25,11 +25,20 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] A Project Manager/site manager cannot create or archive projects/plazas, manage users, or reopen a task directly
 - [ ] A person holding multiple assignments sees the union of their scopes; effective role is Admin > HO > PM > site manager
 - [ ] Admin → Users shows Department and Office for Head Office people; the Access page groups HO members by department and can add/remove a membership with the role flipping on the next request (no re-login)
+- [ ] Admin → Users can create or edit a **Job title** (e.g. `Operations Manager`); the assignee picker uses it as the role label instead of the derived default
 
 ## C. Task workflow
 - [ ] Project-level task created → visible to Admin/HO/PM; site managers see it only when assigned
 - [ ] Plaza-level task created → visible to people assigned to that plaza
+- [ ] **Head Office task** created at Head Office level (no project, no department) or on a department → visible to every Admin/HO; a PM/site manager sees it only when assigned
+- [ ] Head Office tasks show the `HO` badge and department tag in the management canvas and a `Head Office › <department>` breadcrumb in the drawer
+- [ ] Management composer selects multiple scopes (projects, plazas, departments, Head Office) and creates one task per scope in a single submit; the assignee picker is enabled only for a single scope
+- [ ] Scope filter accepts multiple scopes, shows removable chips with `+N` overflow, and the Head Office facet narrows to HO work
+- [ ] Group by **Department** groups HO tasks by department and leaves project work in a Projects lane
+- [ ] Assignee picker shows `Role | Context` (e.g. `Toll Manager | AP Plaza`, `Operations Manager | Head Office · Delhi`) and searches by name, role, project, plaza or department; the current viewer is pinned as "Assign to me"
+- [ ] No "Recent" section appears in the scope or assignee pickers
 - [ ] Assignment ceiling enforced: PM may assign site managers/PMs in the project plus HO/Admin; site manager may assign site managers/PM and never HO/Admin
+- [ ] PM/site manager cannot (re)assign a Head Office task; Admin/HO can
 - [ ] Status todo → in_progress → blocked → in_progress → completed, each with a feed entry
 - [ ] Comment appears as a bubble with author + IST timestamp; photos/PDFs can be attached to a task or a comment
 - [ ] Completed task locked for core edits and reassignment (edit → 423); comments and photos remain allowed
@@ -45,6 +54,8 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] Project detail shows company, code, round, state, length, PIU/RO and the plaza list
 - [ ] Project detail lists project-level tasks (plaza = null) separately from plaza tasks
 - [ ] Search/filters narrow the task list and update the visible count
+- [ ] Portfolio rail pins a Head Office block (All Head Office + per-department rows) and its summary reads `28 projects · 18 departments · X open`
+- [ ] Insights shows a Head Office card with member counts, open work and per-department progress
 - [ ] Admin → Categories can create, rename and deactivate task categories
 
 ## E. Responsive & operations

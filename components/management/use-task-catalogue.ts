@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type {
+  MgmtDepartment,
   MgmtPlaza,
   MgmtPriority,
   MgmtProject,
@@ -63,6 +64,7 @@ export type TaskCatalogue = {
   tasks: MgmtTask[];
   projects: MgmtProject[];
   plazas: MgmtPlaza[];
+  departments: MgmtDepartment[];
   loading: boolean;
   refreshing: boolean;
   error: string | null;
@@ -75,14 +77,15 @@ export type TaskCatalogue = {
 
 /**
  * One catalogue for the management workspace: every task in scope plus the
- * project and plaza summaries the rail and composer need. Mutations are
- * optimistic and roll back to the caller's snapshot on failure, so the UI can
- * stay on the page instead of refetching after every click.
+ * project, plaza and department summaries the rail and composer need. Mutations
+ * are optimistic and roll back to the caller's snapshot on failure, so the UI
+ * can stay on the page instead of refetching after every click.
  */
 export function useTaskCatalogue(): TaskCatalogue {
   const [tasks, setTasks] = useState<MgmtTask[]>([]);
   const [projects, setProjects] = useState<MgmtProject[]>([]);
   const [plazas, setPlazas] = useState<MgmtPlaza[]>([]);
+  const [departments, setDepartments] = useState<MgmtDepartment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,14 +95,21 @@ export function useTaskCatalogue(): TaskCatalogue {
     setError(null);
     setRefreshing(true);
     try {
-      const [taskRows, projectRows, plazaRows] = await Promise.all([
-        loadAllTasks(),
-        apiJson<MgmtProject[]>("/api/projects"),
-        apiJson<MgmtPlaza[]>("/api/plazas"),
-      ]);
+      const [taskRows, projectRows, plazaRows, departmentRows] =
+        await Promise.all([
+          loadAllTasks(),
+          apiJson<MgmtProject[]>("/api/projects"),
+          apiJson<MgmtPlaza[]>("/api/plazas"),
+          // Departments are Admin/HO-only metadata; a failure must never take
+          // the whole workspace down with it.
+          apiJson<MgmtDepartment[]>("/api/departments").catch(
+            () => [] as MgmtDepartment[],
+          ),
+        ]);
       setTasks(taskRows);
       setProjects(projectRows);
       setPlazas(plazaRows);
+      setDepartments(Array.isArray(departmentRows) ? departmentRows : []);
       setUpdatedAt(new Date());
     } catch (cause) {
       setError(
@@ -203,6 +213,7 @@ export function useTaskCatalogue(): TaskCatalogue {
     tasks,
     projects,
     plazas,
+    departments,
     loading,
     refreshing,
     error,

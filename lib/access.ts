@@ -1,8 +1,16 @@
 import type { Prisma, Task } from "@prisma/client";
 
+import {
+  headOfficeContext,
+  plazaRoleLabel,
+  type AssigneeCandidate,
+  type CandidateRole,
+  type PlazaRole,
+} from "./assignee-groups";
 import { auth } from "./auth";
 import { db } from "./db";
 import type { Role } from "./labels";
+import type { TaskScope } from "./task-scope";
 
 export type SessionUser = {
   id: string;
@@ -24,7 +32,12 @@ export type ScopeRole =
 
 export type TaskWithScope = Pick<
   Task,
-  "projectId" | "plazaId" | "status" | "assigneeId" | "createdById"
+  | "projectId"
+  | "plazaId"
+  | "departmentId"
+  | "status"
+  | "assigneeId"
+  | "createdById"
 >;
 
 /** Department fields every membership select needs for display/ordering. */
@@ -250,10 +263,17 @@ export async function effectiveTaskRole(
   // Head Office is global: membership is not scoped to a company/project.
   if (user.role === "HEAD_OFFICE") return "HEAD_OFFICE";
 
+  // Head Office tasks (department scope or Head Office level) are invisible to
+  // project/site users unless the task is assigned to them.
+  if (task.departmentId !== null || task.projectId === null) {
+    return task.assigneeId === user.id ? "SITE_MANAGER" : null;
+  }
+
+  const projectId = task.projectId;
   const [pm, site] = await Promise.all([
     db.projectAssignment.findUnique({
       where: {
-        projectId_userId: { projectId: task.projectId, userId: user.id },
+        projectId_userId: { projectId, userId: user.id },
       },
       select: { projectId: true },
     }),
@@ -273,16 +293,19 @@ export async function effectiveTaskRole(
   return null;
 }
 
-/** Highest role the caller holds in a project/plaza scope, for creation. */
+/** Highest role the caller holds in a scope, for creation and assignment. */
 export async function actorScopeRole(
   user: SessionUser,
-  projectId: string,
-  plazaId: string | null,
+  scope: TaskScope,
 ): Promise<ScopeRole | null> {
   if (user.isAdmin) return "ADMIN";
   // Head Office is global: membership is not scoped to a company/project.
   if (user.role === "HEAD_OFFICE") return "HEAD_OFFICE";
 
+  // Department scope is Admin/Head Office only.
+  if (scope.kind === "department") return null;
+
+  const { projectId, plazaId } = scope;
   const [pm, site] = await Promise.all([
     db.projectAssignment.findUnique({
       where: { projectId_userId: { projectId, userId: user.id } },
@@ -313,6 +336,7 @@ export async function requireTaskAccess(
       id: true,
       projectId: true,
       plazaId: true,
+      departmentId: true,
       status: true,
       assigneeId: true,
       createdById: true,
@@ -387,14 +411,15 @@ export function canApproveReopen(role: ScopeRole): boolean {
   return role === "ADMIN" || role === "HEAD_OFFICE";
 }
 
-/** Who may create a task at this project/plaza scope. */
+/** Who may create a task at this scope. Department scope is Admin/HO only. */
 export async function canCreateTask(
   user: SessionUser,
-  projectId: string,
-  plazaId: string | null,
+  scope: TaskScope,
 ): Promise<boolean> {
   if (user.isAdmin || user.role === "HEAD_OFFICE") return true;
+  if (scope.kind === "department") return false;
 
+  const { projectId, plazaId } = scope;
   // A project manager may file at project level or inside any of its plazas.
   const pm = await db.projectAssignment.findUnique({
     where: { projectId_userId: { projectId, userId: user.id } },
@@ -457,15 +482,15 @@ async function targetRoleOnScope(
 
 /**
  * Assignment ceiling:
- * - Admin/HO may assign any active user.
+ * - Admin/HO may assign any active user, at any scope.
+ * - Department scope is Admin/HO only.
  * - PM may assign HO/Admin, project PMs, and site managers in the project.
  * - Site managers may assign the project PM and site managers on the same plaza,
  *   never HO/Admin.
  */
 export async function canAssignTo(
   actorRole: ScopeRole,
-  projectId: string,
-  plazaId: string | null,
+  scope: TaskScope,
   targetUserId: string,
 ): Promise<boolean> {
   if (actorRole === "ADMIN" || actorRole === "HEAD_OFFICE") {
@@ -476,7 +501,14 @@ export async function canAssignTo(
     return Boolean(target?.active);
   }
 
-  const targetRole = await targetRoleOnScope(targetUserId, projectId, plazaId);
+  // Department scope is Admin/Head Office only.
+  if (scope.kind === "department") return false;
+
+  const targetRole = await targetRoleOnScope(
+    targetUserId,
+    scope.projectId,
+    scope.plazaId,
+  );
   if (!targetRole) return false;
 
   if (actorRole === "PROJECT_MANAGER") {
@@ -495,139 +527,330 @@ export async function canAssignTo(
   return false;
 }
 
-/** Eligible assignees for the picker, already filtered by the ceiling. */
-export async function assigneeCandidates(
-  actorRole: ScopeRole,
-  projectId: string,
-  plazaId: string | null,
-): Promise<
-  {
-    id: string;
-    name: string;
-    role: TargetRole;
-    department?: string | null;
-    office?: string | null;
-  }[]
-> {
-  const project = await db.project.findUnique({
-    where: { id: projectId },
-    select: { id: true },
-  });
-  if (!project) return [];
+// ---------------------------------------------------------------------------
+// Assignee picker payload
+// ---------------------------------------------------------------------------
 
-  if (actorRole === "ADMIN" || actorRole === "HEAD_OFFICE") {
-    const users = await db.user.findMany({
-      where: { active: true },
-      select: {
-        id: true,
-        name: true,
-        isAdmin: true,
-        office: { select: { name: true } },
-        headOfficeMemberships: {
-          select: { isPrimary: true, department: { select: membershipDepartmentSelect } },
-        },
-        projectAssignments: { select: { projectId: true }, take: 1 },
-        plazaAssignments: { select: { plazaId: true }, take: 1 },
-      },
-      orderBy: { name: "asc" },
-    });
-    return users.map((u) => {
-      let role: TargetRole = "SITE_MANAGER";
-      if (u.isAdmin) role = "ADMIN";
-      else if (u.headOfficeMemberships.length > 0) role = "HEAD_OFFICE";
-      else if (u.projectAssignments.length > 0) role = "PROJECT_MANAGER";
-      return {
-        id: u.id,
-        name: u.name,
-        role,
-        department: departmentNameOf(u.headOfficeMemberships),
-        office: u.office?.name ?? null,
-      };
-    });
-  }
-
-  const [pms, site] = await Promise.all([
-    db.projectAssignment.findMany({
-      where: { projectId, user: { active: true } },
-      select: { user: { select: { id: true, name: true } } },
-    }),
-    plazaId
-      ? db.plazaAssignment.findMany({
-          where: { plazaId, user: { active: true } },
-          select: { user: { select: { id: true, name: true } } },
-        })
-      : db.plazaAssignment.findMany({
-          where: { plaza: { projectId }, user: { active: true } },
-          select: { user: { select: { id: true, name: true } } },
-        }),
-  ]);
-
-  type Candidate = {
-    id: string;
-    name: string;
-    role: TargetRole;
-    department?: string | null;
-    office?: string | null;
-  };
-
-  const rows: Candidate[] = [
-    ...pms.map((r) => ({
-      id: r.user.id,
-      name: r.user.name,
-      role: "PROJECT_MANAGER" as const,
-    })),
-    ...site.map((r) => ({
-      id: r.user.id,
-      name: r.user.name,
-      role: "SITE_MANAGER" as const,
-    })),
-  ];
-
-  if (actorRole === "PROJECT_MANAGER") {
-    // Head Office is global, so every active HO member is eligible here.
-    const [ho, admins] = await Promise.all([
-      db.headOfficeMembership.findMany({
-        where: { user: { active: true } },
+/** The user shape every assignee derivation needs. */
+const assigneeSelect = {
+  id: true,
+  name: true,
+  title: true,
+  isAdmin: true,
+  office: { select: { name: true } },
+  headOfficeMemberships: {
+    select: {
+      isPrimary: true,
+      department: { select: { id: true, name: true, sortOrder: true } },
+    },
+  },
+  projectAssignments: {
+    select: {
+      projectId: true,
+      project: { select: { id: true, name: true, acronym: true } },
+    },
+  },
+  plazaAssignments: {
+    select: {
+      plazaId: true,
+      role: true,
+      plaza: {
         select: {
-          isPrimary: true,
-          department: { select: membershipDepartmentSelect },
-          user: {
-            select: {
-              id: true,
-              name: true,
-              office: { select: { name: true } },
-            },
-          },
+          id: true,
+          name: true,
+          project: { select: { id: true, name: true, acronym: true } },
         },
-        orderBy: [
-          { isPrimary: "desc" },
-          { department: { sortOrder: "asc" } },
-          { user: { name: "asc" } },
-        ],
-      }),
-      db.user.findMany({
-        where: { isAdmin: true, active: true },
-        select: { id: true, name: true },
-      }),
-    ]);
-    rows.push(
-      ...ho.map((r) => ({
-        id: r.user.id,
-        name: r.user.name,
-        role: "HEAD_OFFICE" as const,
-        department: departmentNameOf([r]),
-        office: r.user.office?.name ?? null,
-      })),
-      ...admins.map((u) => ({
-        id: u.id,
-        name: u.name,
-        role: "ADMIN" as const,
-      })),
+      },
+    },
+  },
+} as const;
+
+type AssigneeUser = Prisma.UserGetPayload<{ select: typeof assigneeSelect }>;
+type PlazaAssignmentRow = AssigneeUser["plazaAssignments"][number];
+type ProjectAssignmentRow = AssigneeUser["projectAssignments"][number];
+
+const PLAZA_ROLE_ORDER: Record<PlazaRole, number> = {
+  TOLL: 0,
+  MAINTENANCE: 1,
+  CORRIDOR: 2,
+};
+
+function distinct(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function candidateRoleOf(user: AssigneeUser): CandidateRole {
+  if (user.isAdmin) return "ADMIN";
+  if (user.headOfficeMemberships.length > 0) return "HEAD_OFFICE";
+  if (user.projectAssignments.length > 0) return "PROJECT_MANAGER";
+  return "SITE_MANAGER";
+}
+
+/** Is this person assigned to the scope being filled? */
+function inScope(user: AssigneeUser, scope: TaskScope): boolean {
+  if (scope.kind === "department") {
+    return (
+      scope.departmentId !== null &&
+      user.headOfficeMemberships.some(
+        (m) => m.department.id === scope.departmentId,
+      )
     );
   }
+  if (user.projectAssignments.some((p) => p.projectId === scope.projectId)) {
+    return true;
+  }
+  if (scope.plazaId !== null) {
+    return user.plazaAssignments.some((a) => a.plazaId === scope.plazaId);
+  }
+  return user.plazaAssignments.some(
+    (a) => a.plaza.project.id === scope.projectId,
+  );
+}
+
+/**
+ * Primary department: the flagged primary, else the scope's department, else
+ * the lowest `sortOrder`.
+ */
+function primaryMembership(user: AssigneeUser, scope: TaskScope) {
+  const memberships = user.headOfficeMemberships;
+  const primary = memberships.find((m) => m.isPrimary);
+  if (primary) return primary;
+
+  if (scope.kind === "department" && scope.departmentId !== null) {
+    const match = memberships.find(
+      (m) => m.department.id === scope.departmentId,
+    );
+    if (match) return match;
+  }
+
+  return (
+    [...memberships].sort(
+      (a, b) =>
+        a.department.sortOrder - b.department.sortOrder ||
+        a.department.name.localeCompare(b.department.name),
+    )[0] ?? null
+  );
+}
+
+/** Primary project: the scope's project, else alphabetical by project name. */
+function primaryProject(
+  user: AssigneeUser,
+  scope: TaskScope,
+): ProjectAssignmentRow["project"] | null {
+  if (scope.kind === "project") {
+    const match = user.projectAssignments.find(
+      (p) => p.projectId === scope.projectId,
+    );
+    if (match) return match.project;
+  }
+  return (
+    [...user.projectAssignments].sort((a, b) =>
+      a.project.name.localeCompare(b.project.name),
+    )[0]?.project ?? null
+  );
+}
+
+function plazaContext(plaza: PlazaAssignmentRow["plaza"]): string {
+  return plaza.project.acronym
+    ? `${plaza.name} · ${plaza.project.acronym}`
+    : plaza.name;
+}
+
+function byPlazaRoleThenName(
+  a: PlazaAssignmentRow,
+  b: PlazaAssignmentRow,
+): number {
+  return (
+    PLAZA_ROLE_ORDER[a.role] - PLAZA_ROLE_ORDER[b.role] ||
+    a.plaza.name.localeCompare(b.plaza.name)
+  );
+}
+
+/** Primary plaza: the scope's plaza, else one of its project's, else role order. */
+function primaryPlaza(
+  user: AssigneeUser,
+  scope: TaskScope,
+): PlazaAssignmentRow | null {
+  if (scope.kind === "project") {
+    if (scope.plazaId !== null) {
+      const match = user.plazaAssignments.find(
+        (a) => a.plazaId === scope.plazaId,
+      );
+      if (match) return match;
+    }
+    const inProject = user.plazaAssignments.filter(
+      (a) => a.plaza.project.id === scope.projectId,
+    );
+    if (inProject.length > 0) {
+      return [...inProject].sort(byPlazaRoleThenName)[0];
+    }
+  }
+  return [...user.plazaAssignments].sort(byPlazaRoleThenName)[0] ?? null;
+}
+
+function searchHaystack(fields: {
+  name: string;
+  title: string | null;
+  role: CandidateRole;
+  roleLabel: string;
+  contextLabel: string | null;
+  department: string | null;
+  office: string | null;
+  contexts: string[];
+}): string {
+  return [
+    fields.name,
+    fields.title ?? "",
+    fields.role,
+    fields.roleLabel,
+    fields.contextLabel ?? "",
+    fields.department ?? "",
+    fields.office ?? "",
+    ...fields.contexts,
+    "administrator head office project manager site manager toll manager maintenance manager corridor manager",
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function toCandidate(
+  user: AssigneeUser,
+  scope: TaskScope,
+): AssigneeCandidate {
+  const role = candidateRoleOf(user);
+  const office = user.office?.name ?? null;
+  const scoped = inScope(user, scope);
+
+  let roleLabel: string;
+  let contextLabel: string | null = null;
+  let department: string | null = null;
+  let departmentId: string | null = null;
+  let departmentSortOrder: number | null = null;
+  let contexts: string[] = [];
+  let extraContextCount = 0;
+  let tier: AssigneeCandidate["tier"];
+
+  if (role === "ADMIN") {
+    roleLabel = user.title || "Administrator";
+    tier = "admin";
+  } else if (role === "HEAD_OFFICE") {
+    const membership = primaryMembership(user, scope);
+    department = membership?.department.name ?? null;
+    departmentId = membership?.department.id ?? null;
+    departmentSortOrder = membership?.department.sortOrder ?? null;
+    contexts = distinct(
+      user.headOfficeMemberships.map((m) => m.department.name),
+    );
+    extraContextCount = Math.max(0, contexts.length - 1);
+    roleLabel = user.title || department || "Head Office";
+    contextLabel = headOfficeContext(office);
+    tier = scoped ? "this-scope" : "head-office";
+  } else if (role === "PROJECT_MANAGER") {
+    const project = primaryProject(user, scope);
+    contexts = distinct(
+      user.projectAssignments.map((p) => p.project.name),
+    );
+    extraContextCount = Math.max(0, contexts.length - 1);
+    roleLabel = user.title || "Project Manager";
+    contextLabel = project?.name ?? null;
+    tier = scoped ? "this-scope" : "project-manager";
+  } else {
+    const plaza = primaryPlaza(user, scope);
+    const plazaIds = distinct(user.plazaAssignments.map((a) => a.plazaId));
+    contexts = distinct(
+      user.plazaAssignments.map((a) => plazaContext(a.plaza)),
+    );
+    extraContextCount = Math.max(0, plazaIds.length - 1);
+    if (plaza) {
+      roleLabel = user.title || plazaRoleLabel(plaza.role);
+      contextLabel = plazaContext(plaza.plaza);
+    } else {
+      roleLabel = user.title || "Site Manager";
+    }
+    tier = scoped ? "this-scope" : "site-manager";
+  }
+
+  return {
+    id: user.id,
+    name: user.name,
+    role,
+    title: user.title,
+    roleLabel,
+    contextLabel,
+    department,
+    departmentId,
+    departmentSortOrder,
+    office,
+    extraContextCount,
+    contexts,
+    tier,
+    search: searchHaystack({
+      name: user.name,
+      title: user.title,
+      role,
+      roleLabel,
+      contextLabel,
+      department,
+      office,
+      contexts,
+    }),
+  };
+}
+
+/**
+ * Eligible assignees for the picker, already filtered by the assignment
+ * ceiling. One query: the `where` clause is the ceiling.
+ */
+export async function assigneeCandidates(
+  actorRole: ScopeRole,
+  scope: TaskScope,
+): Promise<AssigneeCandidate[]> {
+  const privileged = actorRole === "ADMIN" || actorRole === "HEAD_OFFICE";
+  if (scope.kind === "department" && !privileged) return [];
+
+  let where: Prisma.UserWhereInput;
+  if (scope.kind === "department" || privileged) {
+    where = { active: true };
+  } else {
+    const { projectId, plazaId } = scope;
+    const onScope: Prisma.UserWhereInput[] = [
+      { projectAssignments: { some: { projectId } } },
+      {
+        plazaAssignments: {
+          some: plazaId !== null ? { plazaId } : { plaza: { projectId } },
+        },
+      },
+    ];
+
+    if (actorRole === "PROJECT_MANAGER") {
+      where = {
+        active: true,
+        OR: [
+          ...onScope,
+          { headOfficeMemberships: { some: {} } },
+          { isAdmin: true },
+        ],
+      };
+    } else {
+      // Site managers may never assign Head Office or admin accounts.
+      where = {
+        active: true,
+        isAdmin: false,
+        headOfficeMemberships: { none: {} },
+        OR: onScope,
+      };
+    }
+  }
+
+  const users = await db.user.findMany({
+    where,
+    select: assigneeSelect,
+    orderBy: { name: "asc" },
+  });
 
   const seen = new Set<string>();
-  return rows
+  return users
+    .map((user) => toCandidate(user, scope))
     .filter((row) => {
       if (seen.has(row.id)) return false;
       seen.add(row.id);

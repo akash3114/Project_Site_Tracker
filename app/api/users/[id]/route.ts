@@ -9,7 +9,7 @@ type Ctx = { params: { id: string } };
 
 /**
  * PATCH /api/users/:id → Admin only.
- * Supports { name?, phone?, isAdmin?, active?, password? }.
+ * Supports { name?, phone?, title?, isAdmin?, active?, password? }.
  * Deactivation via { active: false } — users are NEVER deleted.
  */
 export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
@@ -36,6 +36,9 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
       ...(parsed.data.phone !== undefined
         ? { phone: parsed.data.phone }
         : {}),
+      ...(parsed.data.title !== undefined
+        ? { title: parsed.data.title?.trim() || null }
+        : {}),
       ...(parsed.data.isAdmin !== undefined
         ? { isAdmin: parsed.data.isAdmin }
         : {}),
@@ -51,6 +54,7 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
       name: true,
       email: true,
       phone: true,
+      title: true,
       isAdmin: true,
       active: true,
       createdAt: true,

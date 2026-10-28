@@ -22,6 +22,7 @@ erDiagram
     projects ||--o{ plazas : "contains"
     projects ||--o{ project_assignments : "team"
     projects ||--o{ tasks : "scopes"
+    departments ||--o{ tasks : "optional Head Office scope"
     plazas ||--o{ plaza_assignments : "team"
     plazas ||--o{ tasks : "optional scope"
     users ||--o{ head_office_memberships : "HEAD_OFFICE"
@@ -39,6 +40,7 @@ erDiagram
         string name
         string email UK "login"
         string phone "nullable"
+        string title "nullable job title, e.g. Operations Manager"
         string passwordHash
         boolean isAdmin "platform admin flag"
         boolean active
@@ -114,8 +116,9 @@ erDiagram
     }
     tasks {
         string id PK
-        string projectId FK "required"
+        string projectId FK "nullable; null = Head Office scope"
         string plazaId FK "nullable = project-level task"
+        string departmentId FK "nullable; Head Office scope only"
         string categoryId FK "nullable"
         string title
         string description "nullable"
@@ -168,9 +171,11 @@ erDiagram
 ### People and companies
 
 * **User** — login identity (`email` unique), display name, optional phone,
-  bcrypt `passwordHash`, `isAdmin`, `active`, and a nullable `officeId` (the
-  office the person sits in). Deactivating sets `active=false`; users are never
-  deleted, so task history keeps its actor/assignee joins.
+  optional `title` (job title shown in assignee pickers, e.g. `Operations
+  Manager`; falls back to the derived role label), bcrypt `passwordHash`,
+  `isAdmin`, `active`, and a nullable `officeId` (the office the person sits
+  in). Deactivating sets `active=false`; users are never deleted, so task
+  history keeps its actor/assignee joins.
 * **Company** — `name` and `code` are unique; `active` soft-archives.
 * **Department** — global Head Office catalogue shared by every company:
   `name` and `code` are unique, `sortOrder` drives display order, `active`
@@ -205,11 +210,22 @@ erDiagram
 
 * **TaskCategory** — admin-managed lookup (`name` unique, `active`). Tasks keep
   `categoryId` nullable; deleting a category sets it to `null` (`SetNull`).
-* **Task** — `projectId` is **required**; `plazaId` is nullable. A task with
-  `plazaId = null` is a **project-level** task. `status` starts at `TODO`;
-  `assigneeId` is optional; `dueDate` is a date; `completedAt` / `completedById`
-  record completion. Deleting a project/plaza with tasks is blocked
-  (`onDelete: Restrict`) — archive instead.
+* **Task** — exactly one **scope**: a project (optionally narrowed to one of
+  its plazas) **or** Head Office (optionally narrowed to one department).
+  `projectId`, `plazaId` and `departmentId` are all nullable, and two CHECK
+  constraints keep the combinations honest:
+
+  | `projectId` | `plazaId` | `departmentId` | Meaning |
+  |---|---|---|---|
+  | set | null | null | Project-level task |
+  | set | set | null | Plaza task (plaza must belong to the project) |
+  | null | null | set | Department task (Head Office) |
+  | null | null | null | Head Office-level task |
+
+  `status` starts at `TODO`; `assigneeId` is optional (one assignee per task);
+  `dueDate` is a date; `completedAt` / `completedById` record completion.
+  Deleting a project/plaza/department with tasks is blocked
+  (`onDelete: Restrict`) — archive the project/plaza instead.
 * **TaskActivity** — immutable, append-only history and comments in one stream.
   A comment is simply `type = COMMENT` with `text`. Rows record the actor,
   optional status transition (`fromStatus` → `toStatus`), optional assignee
@@ -244,9 +260,12 @@ erDiagram
 
 | Rule | Enforced by |
 |---|---|
+| A task is never both project-scoped and department-scoped | `CHECK "Task_scope_at_most_one"` |
+| A plaza task always carries its project | `CHECK "Task_plaza_requires_project"` |
 | Company deletion is blocked while projects exist | `Project.company` → `onDelete: Restrict` |
 | Project deletion is blocked while plazas or tasks exist | `Plaza.project`, `Task.project` → `Restrict` |
 | Plaza deletion is blocked while tasks exist | `Task.plaza` → `Restrict` |
+| Department deletion is blocked while tasks exist | `Task.department` → `Restrict` |
 | Head Office memberships vanish with their user or department | `HeadOfficeMembership.user` / `.department` → `Cascade` |
 | Project/plaza assignments vanish with their user/project/plaza | assignment relations → `Cascade` |
 | Deleting an office keeps its people and clears their office | `User.office` → `SetNull` |
@@ -287,7 +306,7 @@ project/plaza assignments, or no access); an Admin can always re-grant it.
 | Companies | all | all | via visible projects | via visible plazas |
 | Projects | all | all | assigned projects | projects with an assigned plaza |
 | Plazas | all | all | all plazas in assigned projects | assigned plazas only |
-| Tasks | all | all | all tasks in assigned projects (incl. project-level) | tasks in assigned plazas + project-level tasks assigned to them |
+| Tasks | all | all | all tasks in assigned projects (incl. project-level) + Head Office tasks assigned to them | tasks in assigned plazas + project-level and Head Office tasks assigned to them |
 
 * Head Office is global by design: one department membership grants every
   company, project, plaza and task. Departments and offices never narrow access.
@@ -306,8 +325,10 @@ Site Manager** (`effectiveTaskRole`):
 2. Any `HeadOfficeMembership` → `HEAD_OFFICE` (global; no company/project check).
 3. `ProjectAssignment` on the task's project → `PROJECT_MANAGER`.
 4. `PlazaAssignment` on the task's plaza → `SITE_MANAGER`.
-5. No plaza on the task and `assigneeId === user.id` → `SITE_MANAGER` (the
-   project-level fallback).
+5. Head Office task (`departmentId != null` or `projectId == null`) →
+   `SITE_MANAGER` only when `assigneeId === user.id`, else `null`.
+6. No plaza on a project task and `assigneeId === user.id` → `SITE_MANAGER`
+   (the project-level fallback).
 
 The derived display role for navigation uses `isAdmin ? ADMIN :
 headOfficeMemberships.length > 0 ? HEAD_OFFICE : PROJECT_MANAGER`; the header
@@ -323,7 +344,7 @@ metadata only — they do not change any role, capability or approval.
 | Manage companies/categories/users, deactivate users | yes | no | no | no |
 | Create/edit/archive projects and plazas | yes | yes | no | no |
 | Manage Head Office memberships and project/plaza assignments | yes | yes | no | no |
-| Create tasks | any scope | any scope | assigned projects (project or plaza scope) | assigned plazas only (plaza scope) |
+| Create tasks | any project, plaza, department or Head Office level | any project, plaza, department or Head Office level | assigned projects (project or plaza scope) | assigned plazas only (plaza scope) |
 | Edit task core fields | any task | any task | tasks in assigned projects | only tasks they created |
 | Change status / comment / attach | any task | any task | assigned projects | assigned plazas + assigned project-level tasks |
 | View audit trail | yes | yes | no | no |
@@ -343,7 +364,20 @@ metadata only — they do not change any role, capability or approval.
 | Site Manager | the project manager or site managers on the same plaza — never Admin/Head Office |
 
 Assignees must be active. Completed tasks lock assignment changes
-(`taskPermissions.canAssign` is false).
+(`taskPermissions.canAssign` is false). **Head Office tasks** (department or
+Head Office level) are stricter: only Admin/Head Office may (re)assign them,
+whatever the task creator's role; a PM or site manager may be the assignee but
+cannot change it.
+
+### Task scopes and batch creation
+
+A task's scope is stored as `projectId` + optional `plazaId`, or
+`departmentId`, or neither (Head Office level). `POST /api/tasks` accepts one
+scope per request, or a batch body `{ scopes: [...] }` with 1–50 unique scopes.
+Batch creation authorises every scope before writing and then inserts all tasks
+in one transaction, so a single ineligible scope writes nothing. The management
+workspace offers a multi-select scope picker (projects, plazas, departments,
+Head Office) and creates one task per selected scope.
 
 ### Completed-task lock and reopen workflow
 
@@ -395,19 +429,21 @@ Fresh seed profile (`SEED_RESET=1` wipes in FK-safe order first):
   * `sortOrder` follows the source list (1, 4–20); departments are global and
     shared by all three companies.
 * **112 users**: **92 field users** from PM / Toll / Maintenance / Corridor
-  names, plus **Admin**, the C-suite account `management@tracker.local`, and
-  **18 Head Office leads** (one per department). Demo lead offices are Delhi for
+  names, plus **Admin**, the C-suite account `management@tracker.local`
+  (job title `Operations Manager`), and **18 Head Office leads** (one per
+  department, job title `<Department> Lead`). Demo lead offices are Delhi for
   `ADMIN, FIN, SEC, TREAS, INV, LEGAL, IA, HR-LD, HR-COMP, HR-RP` and Mumbai for
   the rest.
 * **20 Head Office memberships**: `management@tracker.local` holds two
   (`SEC` primary + `FIN`) and each department lead holds one (`isPrimary`).
   There is no per-company Head Office row.
-* **6 task categories** and **41 demo tasks**: 35 plaza tasks + 6 project-level
-  tasks (`plazaId = null`), with 16 `TODO`, 10 `IN_PROGRESS`, 5 `BLOCKED`, and
-  10 `COMPLETED`; `priority` cycles through `MEDIUM`, `HIGH`, `LOW`. The seed
-  writes **122 activities** (`CREATED`, `ASSIGNED`, `STATUS_CHANGED`, comments)
-  and one `PENDING` reopen request on a completed task so the approval flow is
-  visible immediately.
+* **6 task categories** and **47 demo tasks**: 35 plaza tasks + 6 project-level
+  tasks (`plazaId = null`) + 6 department tasks, with 18 `TODO`, 12
+  `IN_PROGRESS`, 6 `BLOCKED`, and 11 `COMPLETED`; `priority` cycles through
+  `MEDIUM`, `HIGH`, `LOW`. The department tasks cover Operations (2), Finance &
+  Accounts (2) and IT (2). The seed writes **138 activities** (`CREATED`,
+  `ASSIGNED`, `STATUS_CHANGED`, comments) and one `PENDING` reopen request on a
+  completed task so the approval flow is visible immediately.
 * PM/site access comes from generated project and plaza assignments; Head Office
   access comes solely from the department memberships above.
 

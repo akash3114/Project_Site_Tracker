@@ -54,6 +54,7 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
     tasks,
     projects,
     plazas,
+    departments,
     loading,
     refreshing,
     error,
@@ -161,14 +162,14 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
     [addTask],
   );
 
-  const activeProjectName = useMemo(
-    () =>
-      filters.projectId
-        ? (projects.find((project) => project.id === filters.projectId)?.name ??
-          null)
-        : null,
-    [filters.projectId, projects],
-  );
+  const toggleScope = useCallback((key: string) => {
+    setFilters((previous) => ({
+      ...previous,
+      scopes: previous.scopes.includes(key)
+        ? previous.scopes.filter((row) => row !== key)
+        : [...previous.scopes, key],
+    }));
+  }, []);
 
   const assignees = useMemo(() => {
     const seen = new Map<string, string>();
@@ -192,7 +193,7 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
   return (
     <main className="cockpit-main mgmt-main">
       <PageHeader
-        overline={`All projects · ${roundScope(projects)}`}
+        overline={`All work · ${roundScope(projects)}`}
         title="Delivery overview"
         subtitle="Tasks first. Triage, filter and file work without leaving this page."
         action={
@@ -259,6 +260,7 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
               <CommandComposer
                 projects={projects}
                 plazas={plazas}
+                departments={departments}
                 focusSignal={focusSignal}
                 onCreated={handleCreated}
               />
@@ -266,10 +268,12 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
             <TaskCanvas
               tasks={tasks}
               userId={userId}
+              projects={projects}
+              plazas={plazas}
+              departments={departments}
               filters={filters}
               groupBy={groupBy}
               busyIds={busyIds}
-              activeProjectName={activeProjectName}
               activeAssigneeName={activeAssigneeName}
               onFiltersChange={setFilters}
               onGroupByChange={setGroupBy}
@@ -282,22 +286,23 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
           </div>
           <PortfolioRail
             projects={projects}
+            departments={departments}
             tasks={tasks}
             plazaCount={plazas.length}
-            selectedProjectId={filters.projectId}
-            onSelectProject={(id) =>
-              setFilters((previous) => ({
-                ...previous,
-                projectId: previous.projectId === id ? null : id,
-              }))
-            }
+            selectedScopes={filters.scopes}
+            onToggleScope={toggleScope}
             onViewAll={() => setView("portfolio")}
           />
         </div>
       ) : view === "portfolio" ? (
         <ProjectRegister projects={projects} />
       ) : (
-        <Insights tasks={tasks} projects={projects} plazas={plazas} />
+        <Insights
+          tasks={tasks}
+          projects={projects}
+          plazas={plazas}
+          departments={departments}
+        />
       )}
 
       <p className="cockpit-footnote">

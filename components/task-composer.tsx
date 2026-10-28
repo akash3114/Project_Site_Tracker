@@ -3,89 +3,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { AssigneeOption, CategoryOption } from "@/components/task-filters";
+import type { AssigneeCandidate } from "@/lib/assignee-groups";
+import { AssigneePicker } from "@/components/management/assignee-picker";
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
-
-type CandidateRole =
-  | "ADMIN"
-  | "HEAD_OFFICE"
-  | "PROJECT_MANAGER"
-  | "SITE_MANAGER";
-
-/** Shape returned by GET /api/assignees. */
-type AssigneeCandidate = {
-  id: string;
-  name: string;
-  role?: CandidateRole | null;
-  department?: string | null;
-  office?: string | null;
-};
-
-type AssigneeGroup = {
-  key: string;
-  label: string;
-  rows: AssigneeCandidate[];
-};
-
-const HEAD_OFFICE_FALLBACK = "Head Office";
-
-/**
- * Group candidates for the assignee picker: Administrators, one group per Head Office
- * department (alphabetical), then Project managers and Site managers. Empty
- * groups are dropped. Rows without a known role (the derived fallback list)
- * keep a trailing group so options are never silently lost.
- */
-function groupAssignees(rows: AssigneeCandidate[]): AssigneeGroup[] {
-  const admin: AssigneeCandidate[] = [];
-  const headOffice = new Map<string, AssigneeCandidate[]>();
-  const projectManagers: AssigneeCandidate[] = [];
-  const siteManagers: AssigneeCandidate[] = [];
-  const other: AssigneeCandidate[] = [];
-
-  for (const row of rows) {
-    if (row.role === "ADMIN") {
-      admin.push(row);
-    } else if (row.role === "HEAD_OFFICE") {
-      const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
-      const bucket = headOffice.get(department);
-      if (bucket) bucket.push(row);
-      else headOffice.set(department, [row]);
-    } else if (row.role === "PROJECT_MANAGER") {
-      projectManagers.push(row);
-    } else if (row.role === "SITE_MANAGER") {
-      siteManagers.push(row);
-    } else {
-      other.push(row);
-    }
-  }
-
-  const groups: AssigneeGroup[] = [
-    { key: "admin", label: "Administrators", rows: admin },
-    ...Array.from(headOffice.keys())
-      .sort((a, b) => a.localeCompare(b))
-      .map((department) => ({
-        key: `head-office:${department}`,
-        label: department,
-        rows: headOffice.get(department) ?? [],
-      })),
-    {
-      key: "project-managers",
-      label: "Project managers",
-      rows: projectManagers,
-    },
-    { key: "site-managers", label: "Site managers", rows: siteManagers },
-    { key: "other", label: "Other assignees", rows: other },
-  ];
-
-  return groups.filter((group) => group.rows.length > 0);
-}
-
-/** Native options are one line; HO department rides along as a tooltip. */
-function candidateTitle(row: AssigneeCandidate): string | undefined {
-  if (row.role !== "HEAD_OFFICE") return undefined;
-  const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
-  return `${row.name} · ${department}`;
-}
 
 type PlazaOption = {
   id: string;
@@ -227,6 +148,7 @@ export function TaskComposer({
   const [dueDate, setDueDate] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeCandidate[]>([]);
+  const [viewerId, setViewerId] = useState<string | null>(null);
   const [fetchedCategories, setFetchedCategories] =
     useState<CategoryOption[]>(EMPTY_CATEGORIES);
   const [saving, setSaving] = useState(false);
@@ -252,12 +174,37 @@ export function TaskComposer({
   const scopeKind = scope?.kind ?? null;
   const scopePlazaId = scope?.kind === "plaza" ? scope.plazaId : null;
   const scopeProjectId = scope?.projectId ?? null;
+  // A plaza belongs to a project team, so the picker groups it as a project.
+  const pickerScopeKind: "project" | null = scope ? "project" : null;
 
   // A single-plaza scope preselects itself so the bar posts in one move.
   useEffect(() => {
     if (fixedPlazaId || scopeValue) return;
     if (plazaOptions.length === 1) setScopeValue(`plaza:${plazaOptions[0].id}`);
   }, [fixedPlazaId, plazaOptions, scopeValue]);
+
+  // Best effort: the viewer's id powers the pinned "Assign to me" row.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/users/me", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => null)) as {
+          id?: string;
+        } | null;
+        if (!cancelled && data?.id) setViewerId(data.id);
+      } catch {
+        // Non-fatal: the picker simply has no pinned self row.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Active categories for the optional category select.
   useEffect(() => {
@@ -284,11 +231,6 @@ export function TaskComposer({
         (category) => category.active !== false,
       ),
     [resolvedCategories, fetchedCategories],
-  );
-
-  const assigneeGroups = useMemo(
-    () => groupAssignees(assigneeOptions),
-    [assigneeOptions],
   );
 
   useEffect(() => {
@@ -320,15 +262,7 @@ export function TaskComposer({
           const data = await fetchJson<AssigneeCandidate[]>(
             `/api/assignees?${params.toString()}`,
           );
-          list = (Array.isArray(data) ? data : []).map(
-            ({ id, name, role, department, office }) => ({
-              id,
-              name,
-              role,
-              department,
-              office,
-            }),
-          );
+          list = Array.isArray(data) ? data : [];
         } catch {
           list = null;
         }
@@ -500,28 +434,17 @@ export function TaskComposer({
           value={dueDate}
           onChange={(event) => setDueDate(event.target.value)}
         />
-        <select
+        <AssigneePicker
+          compact
           className="cockpit-composer-assignee"
-          aria-label="Assignee"
-          value={assigneeId}
+          candidates={assigneeOptions}
+          value={assigneeId || null}
+          onChange={(id) => setAssigneeId(id ?? "")}
           disabled={!scope}
-          onChange={(event) => setAssigneeId(event.target.value)}
-        >
-          <option value="">Assignee</option>
-          {assigneeGroups.map((group) => (
-            <optgroup key={group.key} label={group.label}>
-              {group.rows.map((row) => (
-                <option
-                  key={row.id}
-                  value={row.id}
-                  title={candidateTitle(row)}
-                >
-                  {row.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          scopeKind={pickerScopeKind}
+          viewerId={viewerId}
+          placeholder="Assignee"
+        />
         <button
           type="button"
           className="cockpit-composer-toggle"

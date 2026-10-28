@@ -137,10 +137,28 @@ async function main() {
   );
 
   const tasks = await api(admin, "GET", "/api/tasks?pageSize=100");
-  check("admin sees 41 seeded tasks", tasks.data?.total === 41, String(tasks.data?.total));
+  check("admin sees 47 seeded tasks", tasks.data?.total === 47, String(tasks.data?.total));
 
-  const projectLevel = (tasks.data?.items ?? []).filter((t) => t.plaza === null);
+  const projectLevel = (tasks.data?.items ?? []).filter(
+    (t) => t.plaza === null && t.project !== null,
+  );
   check("seed includes project-level tasks", projectLevel.length > 0, `${projectLevel.length} found`);
+
+  const hoTaskCount = (tasks.data?.items ?? []).filter(
+    (t) => t.departmentId !== null || t.projectId === null,
+  ).length;
+  check("seed includes 6 Head Office tasks", hoTaskCount === 6, `${hoTaskCount} found`);
+
+  const hoList = await api(admin, "GET", "/api/tasks?headOffice=true&pageSize=100");
+  check(
+    "headOffice=true filters to Head Office tasks only",
+    hoList.status === 200 &&
+      hoList.data?.total === 6 &&
+      (hoList.data?.items ?? []).every(
+        (t) => t.departmentId !== null || t.projectId === null,
+      ),
+    `HTTP ${hoList.status}, ${hoList.data?.total} rows`,
+  );
 
   const pending = await db.taskReopenRequest.findFirst({
     where: { status: "PENDING" },
@@ -191,13 +209,30 @@ async function main() {
     0,
   );
   check(
-    "departments endpoint returns 18 rows in sortOrder with member counts",
+    "departments endpoint returns 18 rows in sortOrder with member and task counts",
     departmentList.status === 200 &&
       departmentRows.length === 18 &&
       sortedByOrder &&
-      departmentRows.every((row) => typeof row.memberCount === "number") &&
+      departmentRows.every(
+        (row) =>
+          typeof row.memberCount === "number" &&
+          typeof row.open === "number" &&
+          typeof row.progressPct === "number" &&
+          typeof row.task?.total === "number",
+      ) &&
       memberTotal === 20,
     `${departmentRows.length} rows, ${memberTotal} memberships`,
+  );
+
+  const headOfficeDashboard = dashboard.data?.headOffice;
+  check(
+    "dashboard exposes the Head Office block",
+    headOfficeDashboard?.departmentCount === 18 &&
+      typeof headOfficeDashboard?.memberCount === "number" &&
+      Array.isArray(headOfficeDashboard?.departments) &&
+      headOfficeDashboard.departments.length === 18 &&
+      typeof headOfficeDashboard?.task?.total === "number",
+    `${headOfficeDashboard?.departmentCount ?? "missing"} departments, ${headOfficeDashboard?.task?.total ?? "?"} tasks`,
   );
 
   const managementUser = (Array.isArray(hoUsers.data) ? hoUsers.data : []).find(
@@ -267,6 +302,71 @@ async function main() {
       leftover === 0 &&
         (await db.headOfficeMembership.count({ where: { userId: throwaway.id } })) === 0,
       `${throwaway.email} removed`,
+    );
+  }
+
+  // --- Head Office task scope -------------------------------------------
+  const anyProject = (hoProjects.data?.items ?? hoProjects.data ?? [])[0];
+  const firstDepartment = departmentRows[0];
+  if (anyProject && firstDepartment) {
+    const batch = await api(admin, "POST", "/api/tasks", {
+      scopes: [
+        { departmentId: firstDepartment.id },
+        { projectId: anyProject.id },
+      ],
+      title: "Smoke: batch scope task",
+      priority: "LOW",
+    });
+    const batchItems = batch.data?.items ?? [];
+    for (const item of batchItems) createdTaskIds.push(item.id);
+    const hoRow = batchItems.find(
+      (item) => item.departmentId === firstDepartment.id,
+    );
+    const projectRow = batchItems.find(
+      (item) => item.projectId === anyProject.id && item.departmentId === null,
+    );
+    check(
+      "batch create writes one task per scope",
+      batch.status === 201 &&
+        batch.data?.count === 2 &&
+        Boolean(hoRow) &&
+        Boolean(projectRow) &&
+        hoRow?.projectId === null &&
+        projectRow?.plazaId === null,
+      `HTTP ${batch.status}, ${batch.data?.count ?? 0} rows`,
+    );
+
+    const headOfficeAssigneeList = await api(
+      admin,
+      "GET",
+      "/api/assignees?headOffice=true",
+    );
+    const assigneeRows = Array.isArray(headOfficeAssigneeList.data)
+      ? headOfficeAssigneeList.data
+      : [];
+    check(
+      "headOffice=true returns enriched assignee candidates",
+      headOfficeAssigneeList.status === 200 &&
+        assigneeRows.length > 0 &&
+        assigneeRows.every(
+          (row) =>
+            typeof row.roleLabel === "string" &&
+            "contextLabel" in row &&
+            typeof row.tier === "string",
+        ),
+      `HTTP ${headOfficeAssigneeList.status}, ${assigneeRows.length} rows`,
+    );
+
+    const departmentAssigneeList = await api(
+      admin,
+      "GET",
+      `/api/assignees?departmentId=${firstDepartment.id}`,
+    );
+    check(
+      "departmentId returns assignees for the department scope",
+      departmentAssigneeList.status === 200 &&
+        Array.isArray(departmentAssigneeList.data),
+      `HTTP ${departmentAssigneeList.status}`,
     );
   }
 
@@ -477,6 +577,36 @@ async function main() {
       );
     }
 
+    // Head Office tasks are Admin/HO-owned: a site manager may be assigned one
+    // but cannot reassign it.
+    if (firstDepartment) {
+      const hoTask = await api(admin, "POST", "/api/tasks", {
+        departmentId: firstDepartment.id,
+        title: "Smoke: HO task assigned to site manager",
+        priority: "LOW",
+        assigneeId: site.userId,
+      });
+      if (hoTask.data?.id) createdTaskIds.push(hoTask.data.id);
+      const hoVisible = hoTask.data?.id
+        ? await api(siteLogin, "GET", `/api/tasks/${hoTask.data.id}`)
+        : { status: 0, data: null };
+      check(
+        "site manager can open a Head Office task assigned to them",
+        hoVisible.status === 200,
+        `HTTP ${hoVisible.status}`,
+      );
+      const hoReassign = hoTask.data?.id
+        ? await api(siteLogin, "POST", `/api/tasks/${hoTask.data.id}/assign`, {
+            assigneeId: site.userId,
+          })
+        : { status: 0, data: null };
+      check(
+        "site manager cannot reassign a Head Office task",
+        hoReassign.status === 403,
+        `HTTP ${hoReassign.status}`,
+      );
+    }
+
     // Comment with a photo and no text.
     if (ownPlazaTask.data?.id) {
       const form = new FormData();
@@ -548,6 +678,29 @@ async function main() {
       create.status === 201 && create.data?.plaza === null,
       `HTTP ${create.status}`,
     );
+
+    if (firstDepartment) {
+      const hoCreate = await api(pmLogin, "POST", "/api/tasks", {
+        departmentId: firstDepartment.id,
+        title: "Smoke: PM department task",
+        priority: "LOW",
+      });
+      check(
+        "PM cannot create a Head Office department task",
+        hoCreate.status === 403,
+        `HTTP ${hoCreate.status}`,
+      );
+
+      const hoLevelCreate = await api(pmLogin, "POST", "/api/tasks", {
+        title: "Smoke: PM Head Office-level task",
+        priority: "LOW",
+      });
+      check(
+        "PM cannot create a Head Office-level task",
+        hoLevelCreate.status === 403,
+        `HTTP ${hoLevelCreate.status}`,
+      );
+    }
 
     if (create.data?.id) {
       const detail = await api(pmLogin, "GET", `/api/tasks/${create.data.id}`);

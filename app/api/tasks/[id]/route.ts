@@ -8,6 +8,7 @@ import {
 } from "@/lib/access";
 import { db } from "@/lib/db";
 import { taskDetailInclude, taskPermissions } from "@/lib/task-data";
+import type { TaskScope } from "@/lib/task-scope";
 import { updateTaskSchema } from "@/lib/validations";
 
 /** GET /api/tasks/:id → full detail, activity feed, permissions, assignees. */
@@ -27,9 +28,15 @@ export async function GET(
     if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const permissions = taskPermissions(user, access.task, access.role);
+    const { projectId, plazaId, departmentId } = access.task;
+    const scope: TaskScope =
+      departmentId !== null || projectId === null
+        ? { kind: "department", departmentId }
+        : { kind: "project", projectId, plazaId };
+
     const [assignees, pendingReopen] = await Promise.all([
-      permissions.canAssign && (access.role === "ADMIN" || access.role === "HEAD_OFFICE" || access.role === "PROJECT_MANAGER" || access.role === "SITE_MANAGER")
-        ? assigneeCandidates(access.role, task.projectId, task.plazaId)
+      permissions.canAssign
+        ? assigneeCandidates(access.role, scope)
         : Promise.resolve([]),
       db.taskReopenRequest.findFirst({
         where: { taskId: task.id, status: "PENDING" },

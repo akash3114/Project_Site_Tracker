@@ -9,6 +9,14 @@
 
 import type { ProjectSummary } from "@/lib/dashboard";
 import { isOverdue } from "@/lib/format";
+import {
+  parseScopeKey,
+  scopeKey,
+  scopeRefOf,
+  taskMatchesScope,
+  type ScopeRef,
+  type TaskScopeFields,
+} from "@/lib/task-scope";
 
 export type MgmtStatus = "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
 export type MgmtPriority = "LOW" | "MEDIUM" | "HIGH";
@@ -23,6 +31,9 @@ export type MgmtTask = {
   createdAt?: string | null;
   updatedAt?: string | null;
   completedAt?: string | null;
+  projectId?: string | null;
+  plazaId?: string | null;
+  departmentId?: string | null;
   project?: {
     id: string;
     name: string;
@@ -36,6 +47,12 @@ export type MgmtTask = {
     state?: string | null;
     project?: { id: string; name: string } | null;
   } | null;
+  department?: {
+    id: string;
+    name: string;
+    code?: string | null;
+    sortOrder?: number | null;
+  } | null;
   category?: { id: string; name: string } | null;
   assignee?: { id: string; name: string } | null;
   createdBy?: { id: string; name: string } | null;
@@ -43,6 +60,18 @@ export type MgmtTask = {
 };
 
 export type MgmtProject = ProjectSummary;
+
+export type MgmtDepartment = {
+  id: string;
+  name: string;
+  code?: string | null;
+  sortOrder?: number;
+  active?: boolean;
+  memberCount?: number;
+  open?: number;
+  progressPct?: number;
+  task?: { total: number; completed: number; blocked: number; overdue: number };
+};
 
 export type MgmtPlaza = {
   id: string;
@@ -65,7 +94,13 @@ export type ComposerPlaza = {
 };
 
 export type ViewKey = "tasks" | "portfolio" | "insights";
-export type GroupBy = "priority" | "status" | "due" | "project" | "level";
+export type GroupBy =
+  | "priority"
+  | "status"
+  | "due"
+  | "project"
+  | "department"
+  | "level";
 
 export type TaskFilters = {
   /** Empty array = every priority. */
@@ -77,7 +112,8 @@ export type TaskFilters = {
   unassigned: boolean;
   mine: boolean;
   q: string;
-  projectId: string | null;
+  /** Scope keys (`project:<id>`, `plaza:<id>`, `department:<id>`, `head-office`). */
+  scopes: string[];
   assigneeId: string | null;
 };
 
@@ -89,7 +125,7 @@ export const EMPTY_FILTERS: TaskFilters = {
   unassigned: false,
   mine: false,
   q: "",
-  projectId: null,
+  scopes: [],
   assigneeId: null,
 };
 
@@ -103,6 +139,7 @@ export type FacetCounts = {
   unassigned: number;
   mine: number;
   dueWeek: number;
+  headOffice: number;
 };
 
 export type TaskGroup = {
@@ -208,11 +245,47 @@ export function dueBucket(task: MgmtTask, today = new Date()): DueBucket {
 }
 
 export function projectNameOf(task: MgmtTask): string {
-  return task.project?.name ?? task.plaza?.project?.name ?? "Project";
+  return (
+    task.project?.name ??
+    task.plaza?.project?.name ??
+    (isHeadOfficeTask(task) ? "Head Office" : "Project")
+  );
 }
 
 export function projectIdOf(task: MgmtTask): string | null {
-  return task.project?.id ?? task.plaza?.project?.id ?? null;
+  return task.project?.id ?? task.plaza?.project?.id ?? task.projectId ?? null;
+}
+
+export function departmentIdOf(task: MgmtTask): string | null {
+  return task.department?.id ?? task.departmentId ?? null;
+}
+
+export function departmentNameOf(task: MgmtTask): string | null {
+  return task.department?.name ?? null;
+}
+
+/** Head Office tasks have a department, or no project at all. */
+export function isHeadOfficeTask(task: MgmtTask): boolean {
+  return departmentIdOf(task) !== null || projectIdOf(task) === null;
+}
+
+/** The three scope columns, normalised from the payload's nested relations. */
+export function scopeFieldsOf(task: MgmtTask): TaskScopeFields {
+  return {
+    projectId: projectIdOf(task),
+    plazaId: plazaIdOf(task),
+    departmentId: departmentIdOf(task),
+  };
+}
+
+function plazaIdOf(task: MgmtTask): string | null {
+  return task.plaza?.id ?? task.plazaId ?? null;
+}
+
+/** Stable scope key for a task, matching `lib/task-scope`. */
+export function scopeKeyOfTask(task: MgmtTask): string {
+  const ref = scopeRefOf(scopeFieldsOf(task));
+  return ref ? scopeKey(ref) : "head-office";
 }
 
 /** Free-text haystack used by search and the current filters. */
@@ -225,6 +298,11 @@ function haystack(task: MgmtTask): string {
     projectNameOf(task),
     task.project?.acronym ?? "",
     task.project?.company?.name ?? "",
+    task.project?.company?.code ?? "",
+    task.department?.name ?? "",
+    task.department?.code ?? "",
+    // Location words: the scope picker's own vocabulary.
+    ...(isHeadOfficeTask(task) ? ["head office"] : []),
     task.category?.name ?? "",
     task.assignee?.name ?? "",
     statusOf(task),
@@ -235,17 +313,23 @@ function haystack(task: MgmtTask): string {
 }
 
 /**
- * Project, assignee and text scope. Facet counts are computed over this set so
- * chips never show numbers for rows a scope filter has already excluded.
+ * Project, department, assignee and text scope. Facet counts are computed over
+ * this set so chips never show numbers for rows a scope filter has excluded.
+ * Multiple scopes combine with OR.
  */
 export function scopeTasks(
   tasks: MgmtTask[],
   filters: TaskFilters,
 ): MgmtTask[] {
   const q = filters.q.trim().toLowerCase();
+  const refs: ScopeRef[] = filters.scopes
+    .map((key) => parseScopeKey(key))
+    .filter((ref): ref is ScopeRef => ref !== null);
+
   return tasks.filter((task) => {
-    if (filters.projectId && projectIdOf(task) !== filters.projectId) {
-      return false;
+    if (refs.length > 0) {
+      const fields = scopeFieldsOf(task);
+      if (!refs.some((ref) => taskMatchesScope(fields, ref))) return false;
     }
     if (filters.assigneeId && task.assignee?.id !== filters.assigneeId) {
       return false;
@@ -255,7 +339,7 @@ export function scopeTasks(
   });
 }
 
-/** True when any filter is on (project/assignee included). */
+/** True when any filter is on (scope/assignee included). */
 export function hasActiveFilters(filters: TaskFilters): boolean {
   return (
     filters.priorities.length > 0 ||
@@ -265,7 +349,7 @@ export function hasActiveFilters(filters: TaskFilters): boolean {
     filters.unassigned ||
     filters.mine ||
     filters.q.trim().length > 0 ||
-    filters.projectId !== null ||
+    filters.scopes.length > 0 ||
     filters.assigneeId !== null
   );
 }
@@ -448,7 +532,12 @@ export function groupTasks(
       string,
       { name: string; tasks: MgmtTask[] }
     >();
+    const headOffice: MgmtTask[] = [];
     for (const task of open) {
+      if (isHeadOfficeTask(task)) {
+        headOffice.push(task);
+        continue;
+      }
       const id = projectIdOf(task) ?? "unknown";
       const entry = byProject.get(id) ?? { name: projectNameOf(task), tasks: [] };
       entry.tasks.push(task);
@@ -467,9 +556,69 @@ export function groupTasks(
         tasks: rows,
       });
     }
+    if (headOffice.length > 0) {
+      const rows = headOffice.sort(sortTasks);
+      groups.push({
+        key: "project:head-office",
+        label: "Head Office",
+        tone: "project",
+        hint: groupHint(rows),
+        tasks: rows,
+      });
+    }
+  } else if (groupBy === "department") {
+    const byDepartment = new Map<
+      string,
+      { name: string; tasks: MgmtTask[] }
+    >();
+    const projects: MgmtTask[] = [];
+    for (const task of open) {
+      if (!isHeadOfficeTask(task)) {
+        projects.push(task);
+        continue;
+      }
+      const name = departmentNameOf(task) ?? "Head Office";
+      const id = departmentIdOf(task) ?? name;
+      const entry = byDepartment.get(id) ?? { name, tasks: [] };
+      entry.tasks.push(task);
+      byDepartment.set(id, entry);
+    }
+    const ordered = Array.from(byDepartment.entries()).sort((a, b) =>
+      a[1].name.localeCompare(b[1].name),
+    );
+    for (const [id, entry] of ordered) {
+      const rows = entry.tasks.sort(sortTasks);
+      groups.push({
+        key: `department:${id}`,
+        label: entry.name,
+        tone: "project",
+        hint: groupHint(rows),
+        tasks: rows,
+      });
+    }
+    if (projects.length > 0) {
+      const rows = projects.sort(sortTasks);
+      groups.push({
+        key: "department:projects",
+        label: "Projects",
+        tone: "project",
+        hint: groupHint(rows),
+        tasks: rows,
+      });
+    }
   } else if (groupBy === "level") {
-    const plazaLevel = open.filter((task) => task.plaza).sort(sortTasks);
-    const projectLevel = open.filter((task) => !task.plaza).sort(sortTasks);
+    const plazaLevel = open
+      .filter((task) => !isHeadOfficeTask(task) && plazaIdOf(task) !== null)
+      .sort(sortTasks);
+    const projectLevel = open
+      .filter((task) => !isHeadOfficeTask(task) && plazaIdOf(task) === null)
+      .sort(sortTasks);
+    const departmentLevel = open
+      .filter((task) => isHeadOfficeTask(task) && departmentIdOf(task) !== null)
+      .sort(sortTasks);
+    const headOfficeLevel = open
+      .filter((task) => isHeadOfficeTask(task) && departmentIdOf(task) === null)
+      .sort(sortTasks);
     if (plazaLevel.length > 0) {
       groups.push({
         key: "level:plaza",
@@ -488,13 +637,31 @@ export function groupTasks(
         tasks: projectLevel,
       });
     }
+    if (departmentLevel.length > 0) {
+      groups.push({
+        key: "level:department",
+        label: "Department-level",
+        tone: "project",
+        hint: groupHint(departmentLevel),
+        tasks: departmentLevel,
+      });
+    }
+    if (headOfficeLevel.length > 0) {
+      groups.push({
+        key: "level:head-office",
+        label: "Head Office-level",
+        tone: "project",
+        hint: groupHint(headOfficeLevel),
+        tasks: headOfficeLevel,
+      });
+    }
   }
 
   if (completed.length > 0) groups.push(completedLane(completed));
   return groups;
 }
 
-/** Counts for the facet strip. Scoped by project/assignee/text only. */
+/** Counts for the facet strip. Scoped by scope/assignee/text only. */
 export function countFacets(
   tasks: MgmtTask[],
   filters: TaskFilters,
@@ -511,6 +678,7 @@ export function countFacets(
     blocked: open.filter((task) => statusOf(task) === "BLOCKED").length,
     unassigned: open.filter((task) => !task.assignee).length,
     mine: open.filter((task) => task.assignee?.id === userId).length,
+    headOffice: open.filter(isHeadOfficeTask).length,
     dueWeek: open.filter((task) => {
       const bucket = dueBucket(task);
       return bucket === "today" || bucket === "week";
