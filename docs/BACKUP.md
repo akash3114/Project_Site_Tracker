@@ -24,7 +24,7 @@ ls -t /backups/tracker-*.sql.gz | head -1
 # 2. Restore to SCRATCH db (never overwrite prod without snapshot)
 docker exec -i tracker-db psql -U tracker -c "CREATE DATABASE tracker_restore;"
 gunzip -c /backups/tracker-2026-10-09.sql.gz | docker exec -i tracker-db psql -U tracker -d tracker_restore
-# 3. Verify counts match prod expectations (current seed: 3 companies / 28 projects / 46 plazas / 112 users / 41 tasks)
+# 3. Verify counts match prod expectations (current seed: 3 companies / 28 projects / 46 plazas / 112 users / 47 tasks)
 docker exec tracker-db psql -U tracker -d tracker_restore -c "SELECT (SELECT count(*) FROM \"Company\") AS companies, (SELECT count(*) FROM \"Project\") AS projects, (SELECT count(*) FROM \"Plaza\") AS plazas, (SELECT count(*) FROM \"User\") AS users, (SELECT count(*) FROM \"Task\") AS tasks;"
 ```
 

@@ -52,7 +52,11 @@ Workflow rules that constrain the schema:
 - Head Office departments are **display metadata and a task location**, never a
   permission boundary.
 
-### Current tables (14 models, 6 enums)
+### Current tables at audit time (14 models, 6 enums)
+
+> Historical snapshot. After the Phase 2 cleanup the database has **15 models**
+> (adds `AuditLog`) and **7 enums** (adds `TaskScopeKind`); see
+> [`ERD.md`](./ERD.md) and [`SCHEMA.md`](./SCHEMA.md) for the current state.
 
 `User`, `Company`, `Department`, `Office`, `HeadOfficeMembership`, `Project`,
 `Plaza`, `ProjectAssignment`, `PlazaAssignment`, `TaskCategory`, `Task`,
@@ -61,7 +65,11 @@ Workflow rules that constrain the schema:
 Enums: `Round`, `PlazaRole`, `TaskStatus`, `Priority`, `TaskActivityType`,
 `ReopenRequestStatus`.
 
-### Current migration history (4 files)
+### Migration history at audit time (4 files)
+
+> Historical snapshot. Three forward-only migrations were added on 2026-10-29;
+> see [`SCHEMA.md` § Migration history](./SCHEMA.md#migration-history) for the
+> current seven.
 
 | Migration | What it did |
 |---|---|
@@ -73,10 +81,15 @@ Enums: `Round`, `PlazaRole`, `TaskStatus`, `Priority`, `TaskActivityType`,
 Hand-written SQL that Prisma cannot express, and which therefore exists **only**
 in migrations (easy to lose when squashing):
 
-- `Task_scope_at_most_one`
-- `Task_plaza_requires_project`
+- `Task_scope_at_most_one` — dropped by `20261029000002`
+- `Task_plaza_requires_project` — dropped by `20261029000002`
 - `HeadOfficeMembership_userId_primary_key` (partial unique)
 - `TaskReopenRequest_taskId_pending_key` (partial unique)
+
+After the Phase 2 cleanup, `Task_scope_kind_check`,
+`ProjectAssignment_projectId_primary_key`,
+`PlazaAssignment_plazaId_role_primary_key` and `User_email_lower_key` join this
+list. See [`ERD.md` § Constraints](./ERD.md#7-constraints-worth-knowing).
 
 ---
 

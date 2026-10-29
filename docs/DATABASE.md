@@ -5,6 +5,11 @@ Hierarchy: **Company → Project → Plaza**, with access granted by assignment:
 `HeadOfficeMembership (HEAD_OFFICE)` / `ProjectAssignment (Project Manager)` /
 `PlazaAssignment (TOLL | MAINTENANCE | CORRIDOR)`.
 
+Companions: [`ERD.md`](./ERD.md) (relationship diagrams and cardinality),
+[`SCHEMA.md`](./SCHEMA.md) (column-level data dictionary), and
+[`DATABASE-AUDIT.md`](./DATABASE-AUDIT.md) (cleanup findings and applied
+changes).
+
 There is no account-level role column. `User.isAdmin` is the only account flag;
 everything else is derived from the assignment rows a person holds. Head Office
 is one **global** grant: a department membership is not scoped to a company.
