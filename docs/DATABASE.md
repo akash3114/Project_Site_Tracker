@@ -379,6 +379,12 @@ in one transaction, so a single ineligible scope writes nothing. The management
 workspace offers a multi-select scope picker (projects, plazas, departments,
 Head Office) and creates one task per selected scope.
 
+The assignee picker offers only users associated with the scope — department
+membership for a department or Head Office-level task, project assignment for a
+project, plaza assignment for a plaza — plus the current user. That list is
+guidance, not the permission boundary: the assignment ceiling (`canAssignTo`)
+still validates every assignment on the API independently.
+
 ### Completed-task lock and reopen workflow
 
 1. Moving a task to `COMPLETED` sets `completedAt`/`completedById`.

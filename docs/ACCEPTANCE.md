@@ -10,7 +10,7 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] `npm.cmd exec -- prisma validate` OK
 - [ ] `npx.cmd tsc --noEmit` clean
 - [ ] `npm.cmd run build` succeeds
-- [ ] `node scripts/smoke-api.mjs` — 50/50 (run against a dev server; `SMOKE_BASE_URL` to change it)
+- [ ] `node scripts/smoke-api.mjs` — 55/55 (run against a dev server; `SMOKE_BASE_URL` to change it)
 - [ ] `docker compose -f docker/compose.yml up -d --build` + `/api/health` 200
 
 ## B. Access model (Admin | Head Office | Project Manager | Site Manager)
@@ -37,7 +37,11 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] Group by **Department** groups HO tasks by department and leaves project work in a Projects lane
 - [ ] Assignee picker shows `Role | Context` (e.g. `Toll Manager | AP Plaza`, `Operations Manager | Head Office · Delhi`) and searches by name, role, project, plaza or department; the current viewer is pinned as "Assign to me"
 - [ ] No "Recent" section appears in the scope or assignee pickers
-- [ ] Assignment ceiling enforced: PM may assign site managers/PMs in the project plus HO/Admin; site manager may assign site managers/PM and never HO/Admin
+- [ ] Assignee dropdown lists only people associated with the selected project, plaza or department (plus yourself) and refreshes when the scope changes
+- [ ] Assignee rows show designation/context first and the person's name second
+- [ ] The scope picker's bulk actions (`Select all projects`, `Select all departments`, `Clear`, `N selected`) sit at the top of the dropdown, above the scrolling list
+- [ ] Assignment ceiling enforced at the API: PM may assign site managers/PMs in the project plus HO/Admin; site manager may assign site managers/PM and never HO/Admin
+- [ ] Picker shows only scope-associated people, so ceiling-eligible HO/Admin accounts are not offered in a project scope
 - [ ] PM/site manager cannot (re)assign a Head Office task; Admin/HO can
 - [ ] Status todo → in_progress → blocked → in_progress → completed, each with a feed entry
 - [ ] Comment appears as a bubble with author + IST timestamp; photos/PDFs can be attached to a task or a comment

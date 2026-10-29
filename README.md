@@ -18,7 +18,7 @@ Access is assignment-based; a person may hold several roles and scopes. Head Off
 | `PROJECT_MANAGER` (project assignment) | Project Manager | Assigned projects: project- and plaza-level tasks, assignment within the project; can request (not directly perform) reopen |
 | `PROJECT_MANAGER` (plaza assignment only) | Plaza job title(s) held | Assigned plazas and assigned project-level or Head Office tasks: tasks and statuses; can request (not directly perform) reopen |
 
-A task's scope is a project (optionally one plaza), a department, or Head Office level (no project, no department). The management composer can create one task across several scopes at once; PMs and site managers only see Head Office tasks when they are the assignee, and cannot reassign them.
+A task's scope is a project (optionally one plaza), a department, or Head Office level (no project, no department). The management composer can create one task across several scopes at once; PMs and site managers only see Head Office tasks when they are the assignee, and cannot reassign them. For a single selected scope the assignee picker lists only people associated with that project, plaza or department (plus yourself) and refreshes when the scope changes — guidance only, since the assignment ceiling still validates the API independently.
 
 Users are never deleted (deactivate only). Tasks and events are never deleted.
 
@@ -47,7 +47,7 @@ Rotate the shared `Tracker@123` before handing logins out. Wipe-and-reseed with 
 ## Scripts
 
 - `npm.cmd run lint`, `npm.cmd exec -- tsc --noEmit`, `npm.cmd run build`
-- `node scripts/smoke-api.mjs` (50 runtime checks; needs dev server on `:3000`, set `SMOKE_BASE_URL` to change it)
+- `node scripts/smoke-api.mjs` (55 runtime checks; needs dev server on `:3000`, set `SMOKE_BASE_URL` to change it)
 - `node scripts/parse-master-data.mjs` (regenerates `prisma/master-data.ts` from `docs/master-data.md`)
 - `npm.cmd run reset-admin -- <email> [password]`
 - `npm.cmd run rotate-managers -- <password>` (bulk reset all field-user logins)
