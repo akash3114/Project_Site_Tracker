@@ -109,7 +109,7 @@
   }
 }
 
-/* Role-specific project cockpit */
+/* Role-specific portfolio cockpit */
 .cockpit {
   --c-forest: #173b33;
   --c-deep: #102d27;
@@ -2436,7 +2436,7 @@
   font-size: 10.5px;
 }
 
-/* ---- Projects rail ------------------------------------------------------ */
+/* ---- Portfolio rail ----------------------------------------------------- */
 
 .mgmt-rail {
   position: sticky;
@@ -3727,7 +3727,7 @@
   color: var(--c-forest);
 }
 
-/* Head Office block pinned above the round groups in the projects rail. */
+/* Head Office block pinned above the round groups in the portfolio rail. */
 
 .mgmt-rail-ho {
   padding-bottom: 4px;

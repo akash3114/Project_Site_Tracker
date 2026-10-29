@@ -14,7 +14,7 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] `docker compose -f docker/compose.yml up -d --build` + `/api/health` 200
 
 ## B. Access model (Admin | Head Office | Project Manager | Site Manager)
-- [ ] Admin adds a **Head Office department membership** (Access page) → the user sees every company and project and the header badge reads `Head Office · <department>` (e.g. `Head Office · Secretarial`)
+- [ ] Admin adds a **Head Office department membership** (Access page) → the user sees every company/project in the portfolio and the header badge reads `Head Office · <department>` (e.g. `Head Office · Secretarial`)
 - [ ] Admin/Head Office assigns a **Project Manager** on a project → the user sees the project and all its plazas and can create project- and plaza-level tasks
 - [ ] Admin/Head Office assigns **Toll (primary) / Maintenance / Corridor** roles per plaza → the user sees only those plazas
 - [ ] A site manager sees a project-level task only when assigned to it
@@ -54,12 +54,12 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] No delete control exists for tasks/events anywhere in UI; direct DELETE → 404/405
 
 ## D. Dashboards & registers
-- [ ] Project/workbench snapshots show company, project and plaza counts
+- [ ] Portfolio/workbench snapshots show company, project and plaza counts
 - [ ] Project register groups projects under their company and shows Active/Archived (no lifecycle completion state)
 - [ ] Project detail shows company, code, round, state, length, PIU/RO and the plaza list
 - [ ] Project detail lists project-level tasks (plaza = null) separately from plaza tasks
 - [ ] Search/filters narrow the task list and update the visible count
-- [ ] Projects rail pins a Head Office block (All Head Office + per-department rows) and its summary reads `28 projects · 18 departments · X open`
+- [ ] Portfolio rail pins a Head Office block (All Head Office + per-department rows) and its summary reads `28 projects · 18 departments · X open`
 - [ ] Insights shows a Head Office card with member counts, open work and per-department progress
 - [ ] Admin → Categories can create, rename and deactivate task categories
 
