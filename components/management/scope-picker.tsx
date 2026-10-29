@@ -58,13 +58,23 @@ export function buildScopeOptions(
     rows.push(option);
   };
 
-  push({
-    value: "head-office",
-    label: "Head Office",
-    detail: mode === "create" ? "Head Office level" : "All Head Office work",
-    group: "Head Office",
-    keywords: "head office ho",
-  });
+  push(
+    mode === "create"
+      ? {
+          value: "head-office",
+          label: "Head Office level",
+          detail: "No department",
+          group: "Head Office level",
+          keywords: "head office ho level all no department",
+        }
+      : {
+          value: "head-office",
+          label: "All Head Office",
+          detail: "Departments + level",
+          group: "Head Office",
+          keywords: "head office ho all departments level",
+        },
+  );
 
   for (const department of departments) {
     if (department.active === false) continue;
@@ -72,7 +82,7 @@ export function buildScopeOptions(
       value: `department:${department.id}`,
       label: department.name,
       detail: "Department",
-      group: "Head Office",
+      group: "Departments",
       keywords: keywordsFor(department.code, "department", "head office"),
     });
   }
@@ -244,7 +254,7 @@ export function ScopePicker({
       width="wide"
       maxSelected={MAX_SCOPES}
       disabled={disabled}
-      searchPlaceholder="Search projects, plazas and departments…"
+      searchPlaceholder="Search projects, plazas, departments and Head Office…"
       emptyText="No matching scope."
       renderTrigger={renderTrigger}
       className={["mgmt-scope-picker", className ?? ""].filter(Boolean).join(" ")}
@@ -254,7 +264,7 @@ export function ScopePicker({
             Select all projects
           </button>
           <button type="button" onClick={() => addKeys(departmentKeys)}>
-            Select all departments
+            Select all HO departments
           </button>
           {mode === "filter" ? (
             <button type="button" onClick={() => addKeys(["head-office"])}>
