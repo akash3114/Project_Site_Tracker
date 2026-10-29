@@ -160,7 +160,7 @@ export type InsightsProps = {
   departments?: MgmtDepartment[];
 };
 
-/** Portfolio diagnosis: what the task canvas deliberately keeps off the fold. */
+/** Project diagnosis: what the task canvas deliberately keeps off the fold. */
 export function Insights({
   tasks,
   projects,
@@ -283,7 +283,7 @@ export function Insights({
 
   return (
     <div className="mgmt-insights">
-      <div className="mgmt-insight-metrics" role="group" aria-label="Portfolio summary">
+      <div className="mgmt-insight-metrics" role="group" aria-label="Projects summary">
         <div className="mgmt-insight-metric">
           <span>Total tasks</span>
           <strong>{total.toLocaleString()}</strong>

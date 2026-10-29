@@ -226,7 +226,7 @@ Search-first combobox (same primitive as the scope picker, single-select).
 - `GroupBy`: add `location` (project/department lanes) and `department`
   (HO tasks by department; project tasks under `Projects`). Keep
   priority/status/due.
-- Portfolio rail: pinned `Head Office` block with an `All Head Office` row and
+- Projects rail: pinned `Head Office` block with an `All Head Office` row and
   one row per department; clicking toggles the filter. Summary:
   `28 projects · 18 departments · X open`.
 - Task row: HO badge, department tag, `Head Office` location.

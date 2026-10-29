@@ -80,7 +80,7 @@ export default function ProjectsPage() {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
       <PageHeader
-        overline="Company portfolios"
+        overline="Company projects"
         title="Projects"
         subtitle={
           projects === null && !error

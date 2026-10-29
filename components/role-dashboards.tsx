@@ -391,9 +391,9 @@ function ManagementDashboard() {
 
       {plazas.length > 0 ? <TaskComposer plazas={plazas} tasks={attention} onCreated={() => void load()} /> : null}
 
-      {loading ? <div className="cockpit-loading" aria-label="Loading portfolio" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
+      {loading ? <div className="cockpit-loading" aria-label="Loading projects" /> : error ? <LoadingBlock retry={() => void load()} /> : snapshot ? (
         <>
-          <section className="cockpit-chart-grid" aria-label="Portfolio task charts">
+          <section className="cockpit-chart-grid" aria-label="Project task charts">
             <div className="cockpit-panel">
               <div className="cockpit-panel-head"><div><h2>Task status</h2><span>{Object.values(snapshot.statusCounts).reduce((a, b) => a + b, 0)} tasks</span></div></div>
               <StatusDonut counts={snapshot.statusCounts} />
@@ -410,9 +410,9 @@ function ManagementDashboard() {
             <AttentionPanel tasks={attention} overdue={snapshot.kpis.overdue} blocked={snapshot.kpis.blocked} />
           </section>
 
-          <section className="cockpit-metrics" aria-label="Portfolio summary">
+          <section className="cockpit-metrics" aria-label="Projects summary">
             <Metric label="Projects" value={snapshot.projectCount} note={`${snapshot.companyCount} companies`} />
-            <Metric label="Plaza sites" value={snapshot.plazaCount} note="Portfolio total" />
+            <Metric label="Plaza sites" value={snapshot.plazaCount} note="All projects" />
             <Metric label="Open tasks" value={snapshot.kpis.open} note="Not completed" />
             <Metric label="Overdue" value={snapshot.kpis.overdue} note="Past due date" tone="risk" />
             <Metric label="Blocked" value={snapshot.kpis.blocked} note="Needs unblock" tone="blocked" />

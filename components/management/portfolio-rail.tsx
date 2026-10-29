@@ -217,9 +217,9 @@ export function PortfolioRail({
   const headOfficeSelected = selectedScopes.includes("head-office");
 
   return (
-    <aside className="mgmt-rail" aria-label="Portfolio">
+    <aside className="mgmt-rail" aria-label="Projects">
       <div className="mgmt-rail-head">
-        <h2 className="mgmt-rail-title">Portfolio</h2>
+        <h2 className="mgmt-rail-title">Projects</h2>
         <span className="mgmt-rail-stats">
           {projects.length} projects · {activeDepartments.length} departments ·{" "}
           {openCount} open

@@ -628,7 +628,7 @@ export function AccessManager() {
             </legend>
             <p className="mb-3 text-xs text-[#586760]">
               Head Office is an internal department membership. Holding any
-              department grants portfolio-wide visibility; the primary
+              department grants visibility across all projects; the primary
               department is the one shown in the header badge. Departments do
               not restrict approvals. Changes here apply immediately — the
               button below saves the project and plaza scopes only.
