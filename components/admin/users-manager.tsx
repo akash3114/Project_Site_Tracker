@@ -16,6 +16,7 @@ type UserItem = {
   name: string;
   email: string;
   phone: string | null;
+  title: string | null;
   role: "ADMIN" | "HEAD_OFFICE" | "PROJECT_MANAGER";
   isAdmin: boolean;
   active: boolean;
@@ -64,10 +65,13 @@ export function UsersManager() {
     name: "",
     email: "",
     password: "",
+    title: "",
     isAdmin: false,
   });
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState("");
+  const [titleFor, setTitleFor] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -142,10 +146,16 @@ export function UsersManager() {
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, title: form.title.trim() }),
       });
       if (!res.ok) throw new Error(await readError(res));
-      setForm({ name: "", email: "", password: "", isAdmin: false });
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        title: "",
+        isAdmin: false,
+      });
       setShowCreate(false);
       setNotice("User created");
       await load();
@@ -165,6 +175,13 @@ export function UsersManager() {
     setResetFor(null);
     setResetPw("");
     setNotice("Password reset");
+  }
+
+  async function saveTitle(id: string) {
+    await patch(id, { title: titleDraft.trim() || null });
+    setTitleFor(null);
+    setTitleDraft("");
+    setNotice("Job title updated");
   }
 
   return (
@@ -227,6 +244,16 @@ export function UsersManager() {
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               required
               minLength={6}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
+            Job title
+            <input
+              className={inputCls}
+              value={form.title}
+              placeholder="e.g. Operations Manager"
+              maxLength={100}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
@@ -303,10 +330,10 @@ export function UsersManager() {
           </div>
 
           <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
-            <table className="w-full min-w-[1080px] border-collapse">
+            <table className="w-full min-w-[1140px] border-collapse">
               <thead>
                 <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
-                  <th className={thCls}>Name</th>
+                  <th className={thCls}>Name / Job title</th>
                   <th className={thCls}>Email</th>
                   <th className={thCls}>Account type</th>
                   <th className={thCls}>Department</th>
@@ -332,7 +359,16 @@ export function UsersManager() {
                     key={u.id}
                     className="border-b border-[rgba(23,34,44,0.06)] last:border-0"
                   >
-                    <td className={`${tdCls} font-medium`}>{u.name}</td>
+                    <td className={tdCls}>
+                      <span className="flex flex-col">
+                        <span className="font-medium">{u.name}</span>
+                        {u.title ? (
+                          <span className="font-mono text-[11px] text-[#66756D]">
+                            {u.title}
+                          </span>
+                        ) : null}
+                      </span>
+                    </td>
                     <td className={`${tdCls} font-mono text-xs`}>{u.email}</td>
                     <td className={tdCls}>
                       <select
@@ -397,8 +433,23 @@ export function UsersManager() {
                         <button
                           type="button"
                           onClick={() => {
+                            setTitleFor(titleFor === u.id ? null : u.id);
+                            setTitleDraft(u.title ?? "");
+                            setResetFor(null);
+                            setResetPw("");
+                            setFormError(null);
+                          }}
+                          className={btnCls}
+                        >
+                          Edit title
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
                             setResetFor(resetFor === u.id ? null : u.id);
                             setResetPw("");
+                            setTitleFor(null);
+                            setTitleDraft("");
                             setFormError(null);
                           }}
                           className={btnCls}
@@ -406,6 +457,36 @@ export function UsersManager() {
                           Reset pw
                         </button>
                       </span>
+                      {titleFor === u.id ? (
+                        <span className="mt-2 flex gap-2">
+                          <input
+                            className={inputCls}
+                            placeholder="Job title (optional)"
+                            maxLength={100}
+                            value={titleDraft}
+                            onChange={(e) => setTitleDraft(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => void saveTitle(u.id)}
+                            className="inline-flex min-h-[44px] shrink-0 items-center rounded-[8px] bg-[#173B33] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => {
+                              setTitleFor(null);
+                              setTitleDraft("");
+                            }}
+                            className={btnCls}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : null}
                       {resetFor === u.id ? (
                         <span className="mt-2 flex gap-2">
                           <input

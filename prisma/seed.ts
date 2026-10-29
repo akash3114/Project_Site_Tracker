@@ -119,6 +119,85 @@ function dueDateFor(index: number, now: Date): Date | null {
   return atMidnightUTC(now.getTime() + (14 + (index % 7)) * day);
 }
 
+function dueDateInDays(days: number, now: Date): Date {
+  const d = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+// Six Head Office demo tasks: two each for Operations, Finance and IT, with a
+// mix of statuses. Each is assigned to that department's seeded lead.
+const HEAD_OFFICE_TASKS: {
+  code: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+  status: "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
+  dueInDays: number;
+}[] = [
+  {
+    code: "OPS",
+    title: "Monthly toll collection reconciliation",
+    description:
+      "Reconcile plaza collection reports against bank credits for the month.",
+    category: "Toll Operations",
+    priority: "HIGH",
+    status: "IN_PROGRESS",
+    dueInDays: 3,
+  },
+  {
+    code: "OPS",
+    title: "Shift roster sign-off for next quarter",
+    description:
+      "Confirm toll and maintenance shift rosters with each project manager.",
+    category: "Documentation",
+    priority: "MEDIUM",
+    status: "TODO",
+    dueInDays: 9,
+  },
+  {
+    code: "FIN",
+    title: "Vendor invoice ageing review",
+    description:
+      "Review invoices older than 45 days and clear disputed line items.",
+    category: "Documentation",
+    priority: "HIGH",
+    status: "BLOCKED",
+    dueInDays: -2,
+  },
+  {
+    code: "FIN",
+    title: "Quarterly budget variance pack",
+    description:
+      "Prepare the variance commentary for the Head Office review meeting.",
+    category: "Documentation",
+    priority: "MEDIUM",
+    status: "TODO",
+    dueInDays: 12,
+  },
+  {
+    code: "IT",
+    title: "Toll management system patch rollout",
+    description:
+      "Roll out the approved patch to all plaza lane controllers and verify.",
+    category: "IT & Systems",
+    priority: "HIGH",
+    status: "COMPLETED",
+    dueInDays: -5,
+  },
+  {
+    code: "IT",
+    title: "NVR storage health check across plazas",
+    description:
+      "Audit CCTV retention headroom and flag plazas below 21 days.",
+    category: "IT & Systems",
+    priority: "MEDIUM",
+    status: "IN_PROGRESS",
+    dueInDays: 5,
+  },
+];
+
 async function main(): Promise<void> {
   // Fresh pilot data: wipe in FK-safe order, then rebuild from master-data.md.
   if (process.env.SEED_RESET === "1") {
@@ -210,6 +289,7 @@ async function main(): Promise<void> {
       ),
       isAdmin: false,
       active: true,
+      title: "Operations Manager",
       officeId: delhiOfficeId,
     },
   });
@@ -336,15 +416,17 @@ async function main(): Promise<void> {
   // One demo Head Office lead per department: dept.<code>@tracker.local,
   // password Manage@123, primary membership on their own department.
   const hoLeadPasswordHash = await hashPw(HO_PASSWORD);
+  const headOfficeLeadIdByCode = new Map<string, string>();
   for (const masterDepartment of MASTER_DEPARTMENTS) {
     const departmentId = departmentIdByCode.get(masterDepartment.code)!;
-    await db.user.create({
+    const lead = await db.user.create({
       data: {
         name: `${masterDepartment.name} Lead`,
         email: `dept.${masterDepartment.code.toLowerCase()}@tracker.local`,
         passwordHash: hoLeadPasswordHash,
         isAdmin: false,
         active: true,
+        title: `${masterDepartment.name} Lead`,
         officeId: DELHI_DEPARTMENT_CODES.has(masterDepartment.code)
           ? delhiOfficeId
           : mumbaiOfficeId,
@@ -357,6 +439,7 @@ async function main(): Promise<void> {
         },
       },
     });
+    headOfficeLeadIdByCode.set(masterDepartment.code, lead.id);
   }
 
   // ---- Assignments -------------------------------------------------------
@@ -568,12 +651,91 @@ async function main(): Promise<void> {
     });
   }
 
+  // ---- Head Office (department-scoped) demo tasks ------------------------
+  // Created after the project tasks and the reopen request so those 41 tasks
+  // and the pending reopen row are untouched. Each task sits at department
+  // scope (projectId/plazaId null) and is assigned to that department's lead.
+  const categoryIdByName = new Map(
+    categories.map((category) => [category.name, category.id]),
+  );
+  let headOfficeTasks = 0;
+
+  for (const demo of HEAD_OFFICE_TASKS) {
+    const departmentId = departmentIdByCode.get(demo.code);
+    const assigneeId = headOfficeLeadIdByCode.get(demo.code) ?? null;
+    if (!departmentId) continue;
+
+    const completedAt =
+      demo.status === "COMPLETED"
+        ? new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
+        : null;
+
+    const task = await db.task.create({
+      data: {
+        projectId: null,
+        plazaId: null,
+        departmentId,
+        categoryId: categoryIdByName.get(demo.category) ?? null,
+        title: demo.title,
+        description: demo.description,
+        status: demo.status,
+        priority: demo.priority,
+        assigneeId,
+        createdById: management.id,
+        dueDate: dueDateInDays(demo.dueInDays, now),
+        completedAt,
+        completedById: demo.status === "COMPLETED" ? assigneeId : null,
+      },
+    });
+    createdTaskIds.push(task.id);
+    headOfficeTasks += 1;
+
+    await db.taskActivity.create({
+      data: {
+        taskId: task.id,
+        actorId: management.id,
+        type: "CREATED",
+        toStatus: "TODO",
+        toAssigneeId: assigneeId,
+        text: `Head Office task created · ${demo.code}`,
+      },
+    });
+
+    if (assigneeId) {
+      await db.taskActivity.create({
+        data: {
+          taskId: task.id,
+          actorId: management.id,
+          type: "ASSIGNED",
+          fromStatus: "TODO",
+          toStatus: "TODO",
+          toAssigneeId: assigneeId,
+        },
+      });
+    }
+
+    if (demo.status !== "TODO") {
+      await db.taskActivity.create({
+        data: {
+          taskId: task.id,
+          actorId: assigneeId ?? management.id,
+          type: "STATUS_CHANGED",
+          fromStatus: "TODO",
+          toStatus: demo.status,
+          text: `Moved to ${demo.status.replace("_", " ").toLowerCase()}`,
+        },
+      });
+    }
+  }
+
   const [
     companies,
     projectsCount,
     plazas,
     users,
     tasks,
+    projectTasks,
+    departmentTasks,
     offices,
     departments,
     headOfficeMemberships,
@@ -585,6 +747,8 @@ async function main(): Promise<void> {
     db.plaza.count(),
     db.user.count(),
     db.task.count(),
+    db.task.count({ where: { projectId: { not: null } } }),
+    db.task.count({ where: { departmentId: { not: null } } }),
     db.office.count(),
     db.department.count(),
     db.headOfficeMembership.count(),
@@ -603,10 +767,13 @@ async function main(): Promise<void> {
       users,
       headOfficeMemberships,
       tasks,
+      projectTasks,
+      departmentTasks,
       activities,
       pendingReopen,
       categories: categories.length,
       taskIds: createdTaskIds.length,
+      headOfficeTasks,
     }),
   );
 }

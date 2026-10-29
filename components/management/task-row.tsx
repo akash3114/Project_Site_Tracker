@@ -9,7 +9,9 @@ import {
   PRIORITY_ORDER,
   STATUS_LABELS,
   STATUS_TONES,
+  departmentNameOf,
   isCompleted,
+  isHeadOfficeTask,
   priorityOf,
   statusOf,
   type MgmtPriority,
@@ -25,6 +27,7 @@ function transitionLabel(from: MgmtStatus, to: MgmtStatus): string {
 }
 
 function projectLine(task: MgmtTask): string {
+  if (isHeadOfficeTask(task)) return "Head Office";
   const project = task.project ?? task.plaza?.project ?? null;
   if (!project) return "Project";
   const acronym = "acronym" in project ? project.acronym : null;
@@ -84,8 +87,15 @@ export function TaskRow({
           <strong className="mgmt-row-title" title={task.title}>
             {task.title}
           </strong>
+          {isHeadOfficeTask(task) ? (
+            <span className="mgmt-ho-badge">HO</span>
+          ) : null}
           <span className="mgmt-row-context">
-            {task.plaza ? (
+            {isHeadOfficeTask(task) ? (
+              <span className="mgmt-row-tag" data-level="department">
+                {departmentNameOf(task) ?? "Head Office"}
+              </span>
+            ) : task.plaza ? (
               <span className="mgmt-row-tag">{task.plaza.name}</span>
             ) : (
               <span className="mgmt-row-tag" data-level="project">

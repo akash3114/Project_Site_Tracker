@@ -11,12 +11,16 @@ import {
   hasActiveFacets,
   hasActiveFilters,
   type GroupBy,
+  type MgmtDepartment,
+  type MgmtPlaza,
   type MgmtPriority,
+  type MgmtProject,
   type MgmtStatus,
   type MgmtTask,
   type TaskFilters,
 } from "@/lib/management";
 
+import { buildScopeOptions, ScopePicker } from "./scope-picker";
 import { TaskRow } from "./task-row";
 
 const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
@@ -24,8 +28,12 @@ const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "due", label: "Due urgency" },
   { value: "project", label: "Project" },
+  { value: "department", label: "Department" },
   { value: "level", label: "Task level" },
 ];
+
+/** Scope chips shown before the `+N` overflow chip takes over. */
+const VISIBLE_SCOPES = 3;
 
 function laneId(key: string): string {
   return `lane-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -34,10 +42,12 @@ function laneId(key: string): string {
 export type TaskCanvasProps = {
   tasks: MgmtTask[];
   userId: string;
+  projects: MgmtProject[];
+  plazas: MgmtPlaza[];
+  departments: MgmtDepartment[];
   filters: TaskFilters;
   groupBy: GroupBy;
   busyIds: Set<string>;
-  activeProjectName?: string | null;
   activeAssigneeName?: string | null;
   onFiltersChange: (filters: TaskFilters) => void;
   onGroupByChange: (groupBy: GroupBy) => void;
@@ -53,10 +63,12 @@ export type TaskCanvasProps = {
 export function TaskCanvas({
   tasks,
   userId,
+  projects,
+  plazas,
+  departments,
   filters,
   groupBy,
   busyIds,
-  activeProjectName,
   activeAssigneeName,
   onFiltersChange,
   onGroupByChange,
@@ -65,6 +77,7 @@ export function TaskCanvas({
   onOpen,
 }: TaskCanvasProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAllScopes, setShowAllScopes] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(
     new Set(["completed", "status:COMPLETED"]),
   );
@@ -79,6 +92,28 @@ export function TaskCanvas({
     [tasks, filters, userId],
   );
   const groups = useMemo(() => groupTasks(visible, groupBy), [visible, groupBy]);
+
+  const scopeLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const option of buildScopeOptions(
+      projects,
+      plazas,
+      departments,
+      "filter",
+    )) {
+      labels.set(option.value, option.label);
+    }
+    return labels;
+  }, [projects, plazas, departments]);
+
+  const scopeChips = filters.scopes.map((key) => ({
+    key,
+    label: scopeLabels.get(key) ?? key,
+  }));
+  const shownScopes = showAllScopes
+    ? scopeChips
+    : scopeChips.slice(0, VISIBLE_SCOPES);
+  const hiddenScopeCount = scopeChips.length - shownScopes.length;
 
   // Collapse the completed lane (and other defaults) the first time it appears,
   // without overriding a lane the user has since opened.
@@ -120,6 +155,16 @@ export function TaskCanvas({
     });
   }
 
+  function toggleScopeKey(key: string) {
+    const has = filters.scopes.includes(key);
+    onFiltersChange({
+      ...filters,
+      scopes: has
+        ? filters.scopes.filter((entry) => entry !== key)
+        : [...filters.scopes, key],
+    });
+  }
+
   function toggleLane(key: string) {
     setCollapsed((previous) => {
       const next = new Set(previous);
@@ -149,6 +194,16 @@ export function TaskCanvas({
             }
           />
         </label>
+
+        <ScopePicker
+          projects={projects}
+          plazas={plazas}
+          departments={departments}
+          value={filters.scopes}
+          onChange={(scopes) => onFiltersChange({ ...filters, scopes })}
+          mode="filter"
+          className="mgmt-canvas-scope"
+        />
 
         <button
           type="button"
@@ -251,16 +306,52 @@ export function TaskCanvas({
           <span className="mgmt-facet-count">{counts.mine}</span>
         </button>
 
-        {filters.projectId ? (
-          <span className="mgmt-scope-chip">
-            Project: {activeProjectName ?? "selected"}
-            <button
-              type="button"
-              aria-label="Clear project filter"
-              onClick={() => onFiltersChange({ ...filters, projectId: null })}
-            >
-              ×
-            </button>
+        <button
+          type="button"
+          className="mgmt-facet"
+          data-tone="ho"
+          aria-pressed={filters.scopes.includes("head-office")}
+          onClick={() => toggleScopeKey("head-office")}
+        >
+          Head Office
+          <span className="mgmt-facet-count">{counts.headOffice}</span>
+        </button>
+
+        {scopeChips.length > 0 ? (
+          <span className="mgmt-scope-chips">
+            {shownScopes.map((chip) => (
+              <span className="mgmt-scope-chip" key={chip.key}>
+                {chip.label}
+                <button
+                  type="button"
+                  aria-label={`Remove ${chip.label} filter`}
+                  onClick={() => toggleScopeKey(chip.key)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {hiddenScopeCount > 0 ? (
+              <button
+                type="button"
+                className="mgmt-scope-chip mgmt-scope-chip-more"
+                aria-expanded={showAllScopes}
+                aria-label={`Show ${hiddenScopeCount} more scope filters`}
+                onClick={() => setShowAllScopes(true)}
+              >
+                +{hiddenScopeCount}
+              </button>
+            ) : null}
+            {showAllScopes && scopeChips.length > VISIBLE_SCOPES ? (
+              <button
+                type="button"
+                className="mgmt-scope-chip mgmt-scope-chip-more"
+                aria-expanded
+                onClick={() => setShowAllScopes(false)}
+              >
+                Show less
+              </button>
+            ) : null}
           </span>
         ) : null}
 

@@ -6,7 +6,7 @@ import {
   taskScopeWhere,
 } from "@/lib/access";
 import { db } from "@/lib/db";
-import { globalStats } from "@/lib/stats";
+import { departmentStats, globalStats, headOfficeStats } from "@/lib/stats";
 
 const ROUNDS = ["ROUND_1", "ROUND_2", "ROUND_3", "ROUND_4"] as const;
 type Status = "TODO" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED";
@@ -45,7 +45,8 @@ export async function GET(): Promise<Response> {
     },
   });
 
-  const [stats, statusGroups, roundGroups, companyStats] = await Promise.all([
+  const [stats, statusGroups, roundGroups, companyStats, headOffice] =
+    await Promise.all([
     globalStats(scope),
     Promise.all(
       (["TODO", "IN_PROGRESS", "BLOCKED", "COMPLETED"] as Status[]).map(
@@ -101,6 +102,50 @@ export async function GET(): Promise<Response> {
         };
       }),
     ),
+    (async () => {
+      const departments = await db.department.findMany({
+        where: { active: true },
+        select: { id: true, name: true, code: true },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      });
+
+      const [officeStats, memberCount, departmentRows] = await Promise.all([
+        headOfficeStats(scope),
+        db.user.count({
+          where: { active: true, headOfficeMemberships: { some: {} } },
+        }),
+        Promise.all(
+          departments.map(async (department) => {
+            const departmentStat = await departmentStats(department.id, scope);
+            return {
+              id: department.id,
+              name: department.name,
+              code: department.code,
+              memberCount: departmentStat.memberCount,
+              task: {
+                total: departmentStat.total,
+                completed: departmentStat.completed,
+                blocked: departmentStat.blocked,
+                overdue: departmentStat.overdue,
+              },
+              progressPct: departmentStat.progressPct,
+            };
+          }),
+        ),
+      ]);
+
+      return {
+        departmentCount: departments.length,
+        memberCount,
+        task: {
+          total: officeStats.total,
+          completed: officeStats.completed,
+          blocked: officeStats.blocked,
+          overdue: officeStats.overdue,
+        },
+        departments: departmentRows,
+      };
+    })(),
   ]);
 
   const statusCounts = emptyCounts();
@@ -114,5 +159,6 @@ export async function GET(): Promise<Response> {
     statusCounts,
     rounds: roundGroups,
     companies: companyStats,
+    headOffice,
   });
 }

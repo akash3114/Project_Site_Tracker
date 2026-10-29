@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -11,58 +9,26 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
-import {
-  groupAssignees,
-  type AssigneeCandidate,
-} from "@/lib/assignee-groups";
+import type { AssigneeCandidate } from "@/lib/assignee-groups";
 import type {
   ComposerPlaza,
+  MgmtDepartment,
   MgmtPriority,
   MgmtProject,
   MgmtTask,
 } from "@/lib/management";
+import { parseScopeKey } from "@/lib/task-scope";
 
-type ProjectOption = {
-  id: string;
-  name: string;
-  plazas: { id: string; name: string }[];
-};
-
-type Scope =
-  | { kind: "plaza"; plazaId: string; projectId: string | null }
-  | { kind: "project"; projectId: string };
-
-type PickerOption = {
-  value: string;
-  label: string;
-  meta?: string;
-  group: string;
-};
+import { AssigneePicker } from "./assignee-picker";
+import { ScopePicker, scopeSummary } from "./scope-picker";
 
 type CategoryOption = { id: string; name: string; active?: boolean };
 
-/** Adjacent picker rows with the same group label, keeping their flat index. */
-function groupPickerOptions(options: PickerOption[]): {
-  label: string;
-  rows: { option: PickerOption; index: number }[];
-}[] {
-  const groups: {
-    label: string;
-    rows: { option: PickerOption; index: number }[];
-  }[] = [];
-  options.forEach((option, index) => {
-    const current = groups[groups.length - 1];
-    if (current && current.label === option.group) {
-      current.rows.push({ option, index });
-    } else {
-      groups.push({ label: option.group, rows: [{ option, index }] });
-    }
-  });
-  return groups;
-}
+type CreateResponse = Partial<MgmtTask> & {
+  items?: MgmtTask[];
+  error?: string;
+};
 
-const RECENT_KEY = "pst.mgmt.recentScopes";
-const RECENT_LIMIT = 4;
 const PRIORITIES: MgmtPriority[] = ["LOW", "MEDIUM", "HIGH"];
 const PRIORITY_LABELS: Record<MgmtPriority, string> = {
   LOW: "Low",
@@ -83,167 +49,126 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-function readRecent(): string[] {
-  try {
-    const parsed: unknown = JSON.parse(
-      window.localStorage.getItem(RECENT_KEY) ?? "[]",
-    );
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === "string")
-      : [];
-  } catch {
-    return [];
-  }
+/** `1 task`, `2 tasks`. */
+function plural(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
 /**
- * The management command bar. Priority is a first-class segmented control,
- * the scope picker remembers recent projects, and a successful create keeps
- * every field except the title so a batch of tasks is a batch of keystrokes.
+ * A scope key as the batch-create body expects it. Head Office level is an
+ * empty object because both `projectId` and `departmentId` stay unset.
+ */
+function toScopeInput(key: string): Record<string, string> {
+  const ref = parseScopeKey(key);
+  if (!ref || ref.kind === "head-office") return {};
+  if (ref.kind === "department") return { departmentId: ref.id };
+  if (ref.kind === "project") return { projectId: ref.id };
+  return { plazaId: ref.id };
+}
+
+/**
+ * Query string for `/api/assignees`, derived from an assignee cache key so the
+ * params and the cache entry can never disagree. The key is the single source
+ * of truth for "which scope is this list for".
+ */
+function assigneeQuery(key: string): string {
+  if (key === "head-office") return "headOffice=true";
+  const [kind, id, projectId] = key.split(":");
+  if (kind === "department") {
+    return new URLSearchParams({ departmentId: id }).toString();
+  }
+  if (kind === "project") {
+    return new URLSearchParams({ projectId: id }).toString();
+  }
+  return new URLSearchParams({ projectId, plazaId: id }).toString();
+}
+
+/**
+ * The management command bar. One or more scopes are chosen first, then a
+ * single submit creates one task per scope. A successful create keeps every
+ * field except the title and description so repeat filing is fast.
  */
 export function CommandComposer({
-  projects: projectRows,
+  projects,
   plazas,
+  departments: providedDepartments,
   onCreated,
   focusSignal,
 }: {
   /** Every accessible project, including ones with no plazas yet. */
   projects: MgmtProject[];
   plazas: ComposerPlaza[];
+  /** Departments from the workspace catalogue; the composer fetches when absent. */
+  departments?: MgmtDepartment[];
   onCreated: (task: MgmtTask) => void;
   focusSignal?: number;
 }) {
-  const plazaOptions = useMemo(() => plazas, [plazas]);
-
-  const projectGroups = useMemo<ProjectOption[]>(() => {
-    const byId = new Map<string, ProjectOption>();
-    for (const project of projectRows) {
-      byId.set(project.id, {
-        id: project.id,
-        name: project.name,
-        plazas: [],
-      });
-    }
-    for (const plaza of plazaOptions) {
-      if (!plaza.project?.id) continue;
-      const project =
-        byId.get(plaza.project.id) ??
-        ({
-          id: plaza.project.id,
-          name: plaza.project.name,
-          plazas: [],
-        } as ProjectOption);
-      if (!project.plazas.some((entry) => entry.id === plaza.id)) {
-        project.plazas.push({ id: plaza.id, name: plaza.name });
-      }
-      byId.set(project.id, project);
-    }
-    return Array.from(byId.values())
-      .map((project) => ({
-        ...project,
-        plazas: [...project.plazas].sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [projectRows, plazaOptions]);
-
-  const orphanPlazas = useMemo(
-    () => plazaOptions.filter((plaza) => !plaza.project?.id),
-    [plazaOptions],
-  );
-
-  const [scopeValue, setScopeValue] = useState("");
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
+  const [fetchedDepartments, setFetchedDepartments] = useState<
+    MgmtDepartment[]
+  >([]);
+  const departments = providedDepartments ?? fetchedDepartments;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [priority, setPriority] = useState<MgmtPriority>("MEDIUM");
   const [dueDate, setDueDate] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeId, setAssigneeId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<AssigneeCandidate[]>([]);
   const [assigneesLoading, setAssigneesLoading] = useState(false);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [viewerId, setViewerId] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [alert, setAlert] = useState<{
     tone: "error" | "ok";
     text: string;
   } | null>(null);
 
-  const [recentScopes, setRecentScopes] = useState<string[]>([]);
-  const [recentLoaded, setRecentLoaded] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-
   const titleRef = useRef<HTMLInputElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const scopeRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const priorityRef = useRef<HTMLDivElement>(null);
-  const didPreselect = useRef(false);
   const ownerCache = useRef(new Map<string, AssigneeCandidate[]>());
-  const scopeListId = useId();
-  const optionId = useCallback(
-    (index: number) => `${scopeListId}-option-${index}`,
-    [scopeListId],
-  );
-
-  const validScopes = useMemo(() => {
-    const set = new Set<string>();
-    for (const project of projectGroups) {
-      set.add(`project:${project.id}`);
-      for (const plaza of project.plazas) set.add(`plaza:${plaza.id}`);
-    }
-    for (const plaza of orphanPlazas) set.add(`plaza:${plaza.id}`);
-    return set;
-  }, [projectGroups, orphanPlazas]);
-
-  const scope = useMemo<Scope | null>(() => {
-    const separator = scopeValue.indexOf(":");
-    if (separator === -1) return null;
-    const kind = scopeValue.slice(0, separator);
-    const id = scopeValue.slice(separator + 1);
-    if (kind === "project") {
-      return projectGroups.some((project) => project.id === id)
-        ? { kind: "project", projectId: id }
-        : null;
-    }
-    if (kind === "plaza") {
-      const plaza = plazaOptions.find((entry) => entry.id === id);
-      if (!plaza) return null;
-      return {
-        kind: "plaza",
-        plazaId: plaza.id,
-        projectId: plaza.project?.id ?? null,
-      };
-    }
-    return null;
-  }, [scopeValue, projectGroups, plazaOptions]);
-
-  const scopeKind = scope?.kind ?? null;
-  const scopePlazaId = scope?.kind === "plaza" ? scope.plazaId : null;
-  const scopeProjectId = scope?.projectId ?? null;
-
-  // Recent scopes come from localStorage after hydration (never during SSR).
-  useEffect(() => {
-    setRecentScopes(readRecent());
-    setRecentLoaded(true);
-  }, []);
-
-  // Preselect the most recent scope so repeat filing starts one click ahead.
-  // Scopes arrive after the localStorage read, so wait for a valid one.
-  useEffect(() => {
-    if (!recentLoaded || didPreselect.current) return;
-    if (validScopes.size === 0) return;
-    didPreselect.current = true;
-    if (scopeValue) return;
-    const first = recentScopes.find((value) => validScopes.has(value));
-    if (first) setScopeValue(first);
-  }, [recentLoaded, recentScopes, validScopes, scopeValue]);
 
   useEffect(() => {
     if (!focusSignal) return;
     titleRef.current?.focus();
   }, [focusSignal]);
+
+  // Departments are only available to Admin/Head Office; this page is theirs.
+  // The workspace passes them in, so only fall back to a fetch for other callers.
+  useEffect(() => {
+    if (providedDepartments) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchJson<MgmtDepartment[]>("/api/departments");
+        if (!cancelled) {
+          setFetchedDepartments(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        // Without departments the picker still offers Head Office and projects.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [providedDepartments]);
+
+  // The assignee payload does not expose the viewer; "Assign to me" needs it.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchJson<{ id?: string }>("/api/users/me");
+        if (!cancelled && data?.id) setViewerId(data.id);
+      } catch {
+        // A convenience pin only; the picker works without it.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,38 +192,73 @@ export function CommandComposer({
   }, []);
 
   useEffect(() => {
-    if (!scopeKind) {
-      setAssignees([]);
+    if (alert?.tone !== "ok") return;
+    const timer = window.setTimeout(() => setAlert(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [alert]);
+
+  const singleRef = useMemo(
+    () =>
+      selectedScopes.length === 1
+        ? parseScopeKey(selectedScopes[0])
+        : null,
+    [selectedScopes],
+  );
+
+  /**
+   * Cache key for the assignee list of the single selected scope.
+   *
+   * It encodes everything the query depends on — kind, id and, for a plaza, its
+   * parent project — so a cached list can only be reused for the exact same
+   * scope. `null` means "not exactly one scope" or "plaza without a project";
+   * both leave the picker empty and disabled.
+   */
+  const assigneeKey = useMemo(() => {
+    if (!singleRef) return null;
+    if (singleRef.kind === "head-office") return "head-office";
+    if (singleRef.kind === "department") return `department:${singleRef.id}`;
+    if (singleRef.kind === "project") return `project:${singleRef.id}`;
+    const projectId = plazas.find((plaza) => plaza.id === singleRef.id)?.project
+      ?.id;
+    return projectId ? `plaza:${singleRef.id}:${projectId}` : null;
+  }, [plazas, singleRef]);
+
+  const assigneeScopeKind: "project" | "department" | null = useMemo(() => {
+    if (!singleRef) return null;
+    return singleRef.kind === "head-office" || singleRef.kind === "department"
+      ? "department"
+      : "project";
+  }, [singleRef]);
+
+  // People are scope-specific, so the assignee is only offered when exactly one
+  // scope is selected. Any change of scope — add, remove or replace — drops the
+  // chosen person and the previous scope's list before the new one loads, and a
+  // late response from an abandoned request is ignored via `cancelled`.
+  useEffect(() => {
+    setAssigneeId(null);
+    setAssignees([]);
+
+    if (!assigneeKey) {
       setAssigneesLoading(false);
       return;
     }
-    const key =
-      scopeKind === "plaza"
-        ? `plaza:${scopePlazaId ?? ""}:${scopeProjectId ?? ""}`
-        : `project:${scopeProjectId ?? ""}`;
-    const cached = ownerCache.current.get(key);
+
+    const cached = ownerCache.current.get(assigneeKey);
     if (cached) {
       setAssignees(cached);
       setAssigneesLoading(false);
       return;
     }
 
-    // Keep the previous scope's people from being offered against the new one.
-    setAssignees([]);
     setAssigneesLoading(true);
     let cancelled = false;
     void (async () => {
-      const params = new URLSearchParams();
-      if (scopeProjectId) params.set("projectId", scopeProjectId);
-      if (scopeKind === "plaza" && scopePlazaId) {
-        params.set("plazaId", scopePlazaId);
-      }
       try {
         const data = await fetchJson<AssigneeCandidate[]>(
-          `/api/assignees?${params.toString()}`,
+          `/api/assignees?${assigneeQuery(assigneeKey)}`,
         );
         const rows = Array.isArray(data) ? data : [];
-        ownerCache.current.set(key, rows);
+        ownerCache.current.set(assigneeKey, rows);
         if (!cancelled) setAssignees(rows);
       } catch {
         if (!cancelled) setAssignees([]);
@@ -310,192 +270,7 @@ export function CommandComposer({
     return () => {
       cancelled = true;
     };
-  }, [scopeKind, scopePlazaId, scopeProjectId]);
-
-  // A different scope invalidates the person picked for the previous one.
-  useEffect(() => {
-    setAssigneeId("");
-  }, [scopeKind, scopePlazaId, scopeProjectId]);
-
-  useEffect(() => {
-    if (alert?.tone !== "ok") return;
-    const timer = window.setTimeout(() => setAlert(null), 4000);
-    return () => window.clearTimeout(timer);
-  }, [alert]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    searchRef.current?.focus();
-  }, [pickerOpen]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    function onPointerDown(event: PointerEvent) {
-      if (!scopeRef.current?.contains(event.target as Node)) {
-        setPickerOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [pickerOpen]);
-
-  const assigneeGroups = useMemo(
-    () => groupAssignees(assignees),
-    [assignees],
-  );
-
-  const scopeLabel = useCallback(
-    (value: string): string | null => {
-      const separator = value.indexOf(":");
-      if (separator === -1) return null;
-      const kind = value.slice(0, separator);
-      const id = value.slice(separator + 1);
-      if (kind === "project") {
-        const project = projectGroups.find((entry) => entry.id === id);
-        return project ? `${project.name} · Project-level` : null;
-      }
-      const plaza = plazaOptions.find((entry) => entry.id === id);
-      if (!plaza) return null;
-      return plaza.project
-        ? `${plaza.name} · ${plaza.project.name}`
-        : plaza.name;
-    },
-    [projectGroups, plazaOptions],
-  );
-
-  const scopeMeta = useCallback(
-    (value: string): string | undefined => {
-      const separator = value.indexOf(":");
-      if (separator === -1) return undefined;
-      const kind = value.slice(0, separator);
-      const id = value.slice(separator + 1);
-      if (kind === "project") return "Project-level";
-      return plazaOptions.find((entry) => entry.id === id)?.project?.name;
-    },
-    [plazaOptions],
-  );
-
-  const pickerOptions = useMemo<PickerOption[]>(() => {
-    const needle = query.trim().toLowerCase();
-    const matches = (text: string) => !needle || text.toLowerCase().includes(needle);
-    const rows: PickerOption[] = [];
-    const recentSet = new Set<string>();
-
-    if (!needle) {
-      for (const value of recentScopes) {
-        if (!validScopes.has(value)) continue;
-        const label = scopeLabel(value);
-        if (!label) continue;
-        recentSet.add(value);
-        rows.push({
-          value,
-          label,
-          meta: scopeMeta(value),
-          group: "Recent",
-        });
-      }
-    }
-
-    for (const project of projectGroups) {
-      const projectMatches = matches(project.name);
-      const groupRows: PickerOption[] = [];
-      if (projectMatches) {
-        groupRows.push({
-          value: `project:${project.id}`,
-          label: "Project-level",
-          meta: `${project.plazas.length} ${
-            project.plazas.length === 1 ? "plaza" : "plazas"
-          }`,
-          group: project.name,
-        });
-      }
-      for (const plaza of project.plazas) {
-        if (!projectMatches && !matches(plaza.name)) continue;
-        groupRows.push({
-          value: `plaza:${plaza.id}`,
-          label: plaza.name,
-          meta: project.name,
-          group: project.name,
-        });
-      }
-      rows.push(...groupRows.filter((row) => !recentSet.has(row.value)));
-    }
-
-    for (const plaza of orphanPlazas) {
-      if (!matches(plaza.name)) continue;
-      if (recentSet.has(`plaza:${plaza.id}`)) continue;
-      rows.push({
-        value: `plaza:${plaza.id}`,
-        label: plaza.name,
-        group: "Plazas",
-      });
-    }
-
-    return rows;
-  }, [
-    query,
-    recentScopes,
-    validScopes,
-    projectGroups,
-    orphanPlazas,
-    scopeLabel,
-    scopeMeta,
-  ]);
-
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [query, pickerOpen]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    document
-      .getElementById(optionId(activeIndex))
-      ?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, optionId, pickerOpen, pickerOptions.length]);
-
-  function chooseScope(value: string) {
-    setScopeValue(value);
-    setAssigneeId("");
-    setPickerOpen(false);
-    setQuery("");
-    pushRecent(value);
-    titleRef.current?.focus();
-  }
-
-  function pushRecent(value: string) {
-    setRecentScopes((previous) => {
-      const next = [value, ...previous.filter((entry) => entry !== value)].slice(
-        0,
-        RECENT_LIMIT,
-      );
-      try {
-        window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-      } catch {
-        // Storage can be unavailable in private mode; recents are optional.
-      }
-      return next;
-    });
-  }
-
-  function onPickerKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((index) =>
-        Math.min(index + 1, Math.max(0, pickerOptions.length - 1)),
-      );
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((index) => Math.max(0, index - 1));
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      const option = pickerOptions[activeIndex];
-      if (option) chooseScope(option.value);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      setPickerOpen(false);
-      triggerRef.current?.focus();
-    }
-  }
+  }, [assigneeKey]);
 
   function onPriorityKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     const index = PRIORITIES.indexOf(priority);
@@ -518,19 +293,40 @@ export function CommandComposer({
       [next]?.focus();
   }
 
-  const ready = scope !== null && title.trim().length >= 3;
-  const submitHint = !scope
-    ? "Choose a project or plaza first"
-    : title.trim().length < 3
-      ? "A task title needs at least 3 characters"
-      : "Add task (Enter)";
+  const scopeCount = selectedScopes.length;
+  const summary = scopeSummary(selectedScopes);
+  const summaryText =
+    scopeCount === 0
+      ? "Choose one or more scopes"
+      : [
+          `Creates ${plural(summary.tasks, "task")}`,
+          summary.projects > 0 ? plural(summary.projects, "project") : null,
+          summary.plazas > 0 ? plural(summary.plazas, "plaza") : null,
+          summary.departments > 0
+            ? plural(summary.departments, "department")
+            : null,
+          summary.headOffice > 0 ? "Head Office" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+  const ready = scopeCount > 0 && title.trim().length >= 3 && pending === 0;
+  const submitHint =
+    scopeCount === 0
+      ? "Choose one or more scopes first"
+      : title.trim().length < 3
+        ? "A task title needs at least 3 characters"
+        : scopeCount === 1
+          ? "Add task (Enter)"
+          : `Add ${scopeCount} tasks (Enter)`;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ready || !scope) return;
+    if (!ready) return;
+
     const cleanTitle = title.trim();
     const cleanDescription = description.trim();
-    const submittedScope = scope;
+    const submittedScopes = [...selectedScopes];
 
     // Clear the draft before the round trip: the next task can be typed while
     // this one saves, and a late response must not erase it.
@@ -556,8 +352,17 @@ export function CommandComposer({
       title: cleanTitle,
       priority,
     };
-    if (submittedScope.kind === "plaza") body.plazaId = submittedScope.plazaId;
-    else body.projectId = submittedScope.projectId;
+
+    if (submittedScopes.length === 1) {
+      const ref = parseScopeKey(submittedScopes[0]);
+      if (ref?.kind === "project") body.projectId = ref.id;
+      else if (ref?.kind === "plaza") body.plazaId = ref.id;
+      else if (ref?.kind === "department") body.departmentId = ref.id;
+      // Head Office level sends no scope fields at all.
+    } else {
+      body.scopes = submittedScopes.map(toScopeInput);
+    }
+
     if (cleanDescription) body.description = cleanDescription;
     if (dueDate) body.dueDate = dueDate;
     if (assigneeId) body.assigneeId = assigneeId;
@@ -571,7 +376,7 @@ export function CommandComposer({
         body: JSON.stringify(body),
       });
       const data = (await response.json().catch(() => null)) as
-        | (MgmtTask & { error?: string })
+        | CreateResponse
         | null;
       if (!response.ok) {
         restoreDraft();
@@ -581,13 +386,27 @@ export function CommandComposer({
         });
         return;
       }
-      if (!data) {
+
+      const items: MgmtTask[] =
+        data && Array.isArray(data.items)
+          ? data.items
+          : data && typeof data.id === "string"
+            ? [data as MgmtTask]
+            : [];
+      if (items.length === 0) {
         restoreDraft();
         setAlert({ tone: "error", text: "Create failed (empty response)" });
         return;
       }
-      setAlert({ tone: "ok", text: `Added “${cleanTitle}”.` });
-      onCreated(data);
+
+      for (const item of items) onCreated(item);
+      setAlert({
+        tone: "ok",
+        text:
+          items.length === 1
+            ? `Added “${cleanTitle}”.`
+            : `Added ${items.length} tasks.`,
+      });
       window.requestAnimationFrame(() => titleRef.current?.focus());
     } catch {
       restoreDraft();
@@ -597,8 +416,6 @@ export function CommandComposer({
     }
   }
 
-  const selectedScopeLabel = scopeValue ? scopeLabel(scopeValue) : null;
-
   return (
     <form
       className="mgmt-composer"
@@ -607,88 +424,15 @@ export function CommandComposer({
       aria-busy={pending > 0}
     >
       <div className="mgmt-composer-top">
-        <div
-          className="mgmt-scope"
-          ref={scopeRef}
-          data-open={pickerOpen ? "true" : "false"}
-        >
-          <button
-            ref={triggerRef}
-            type="button"
-            className="mgmt-scope-trigger"
-            aria-haspopup="listbox"
-            aria-expanded={pickerOpen}
-            aria-controls={
-              pickerOpen && pickerOptions.length > 0 ? scopeListId : undefined
-            }
-            disabled={projectGroups.length === 0 && orphanPlazas.length === 0}
-            title={selectedScopeLabel ?? "Choose a project or plaza"}
-            onClick={() => setPickerOpen((open) => !open)}
-          >
-            <span>{selectedScopeLabel ?? "Project or plaza"}</span>
-          </button>
-          {pickerOpen ? (
-            <div className="mgmt-scope-popover">
-              <input
-                ref={searchRef}
-                className="mgmt-scope-search"
-                type="search"
-                placeholder="Search projects and plazas…"
-                aria-label="Search projects and plazas"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-expanded={pickerOpen}
-                aria-controls={
-                  pickerOptions.length > 0 ? scopeListId : undefined
-                }
-                aria-activedescendant={
-                  pickerOptions.length > 0 ? optionId(activeIndex) : undefined
-                }
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={onPickerKeyDown}
-              />
-              {pickerOptions.length === 0 ? (
-                <p className="mgmt-scope-empty">No matching scope.</p>
-              ) : (
-                <div
-                  className="mgmt-scope-list"
-                  id={scopeListId}
-                  role="listbox"
-                  aria-label="Project or plaza"
-                >
-                  {groupPickerOptions(pickerOptions).map((group) => (
-                    <div key={group.label} role="group" aria-label={group.label}>
-                      <div className="mgmt-scope-group" aria-hidden="true">
-                        {group.label}
-                      </div>
-                      {group.rows.map(({ option, index }) => (
-                        <button
-                          key={`${option.group}:${option.value}`}
-                          id={optionId(index)}
-                          type="button"
-                          className="mgmt-scope-option"
-                          role="option"
-                          tabIndex={-1}
-                          aria-selected={scopeValue === option.value}
-                          data-active={index === activeIndex ? "true" : "false"}
-                          data-selected={
-                            scopeValue === option.value ? "true" : "false"
-                          }
-                          onMouseEnter={() => setActiveIndex(index)}
-                          onClick={() => chooseScope(option.value)}
-                        >
-                          <span>{option.label}</span>
-                          {option.meta ? <small>{option.meta}</small> : null}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
-        </div>
+        <ScopePicker
+          projects={projects}
+          plazas={plazas}
+          departments={departments}
+          value={selectedScopes}
+          onChange={setSelectedScopes}
+          mode="create"
+          className="mgmt-scope-picker"
+        />
 
         <input
           ref={titleRef}
@@ -729,9 +473,11 @@ export function CommandComposer({
           disabled={!ready}
           title={submitHint}
         >
-          Add task
+          {scopeCount > 1 ? `Add ${scopeCount} tasks` : "Add task"}
         </button>
       </div>
+
+      <p className="mgmt-composer-scope-summary">{summaryText}</p>
 
       <div className="mgmt-composer-meta">
         <label className="mgmt-composer-field">
@@ -744,37 +490,33 @@ export function CommandComposer({
           />
         </label>
 
-        <label className="mgmt-composer-field">
+        <div className="mgmt-composer-field">
           <span>Assignee</span>
-          <select
-            className="mgmt-composer-input"
+          <AssigneePicker
+            candidates={assignees}
             value={assigneeId}
-            disabled={!scope || assigneesLoading}
-            aria-busy={assigneesLoading}
-            onChange={(event) => setAssigneeId(event.target.value)}
-          >
-            <option value="">
-              {assigneesLoading ? "Loading assignees…" : "Unassigned"}
-            </option>
-            {assigneeGroups.map((group) => (
-              <optgroup key={group.key} label={group.label}>
-                {group.rows.map((row) => (
-                  <option
-                    key={row.id}
-                    value={row.id}
-                    title={
-                      row.role === "HEAD_OFFICE"
-                        ? `${row.name} · ${row.department ?? "Head Office"}`
-                        : undefined
-                    }
-                  >
-                    {row.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
+            onChange={setAssigneeId}
+            loading={assigneesLoading}
+            disabled={scopeCount !== 1}
+            scopeKind={assigneeScopeKind}
+            viewerId={viewerId}
+            compact
+          />
+        </div>
+
+        {scopeCount === 0 ? (
+          <span className="mgmt-composer-note">
+            Pick a scope to choose an assignee
+          </span>
+        ) : scopeCount > 1 ? (
+          <span className="mgmt-composer-note">
+            Pick one scope to assign now
+          </span>
+        ) : !assigneesLoading && assignees.length === 0 ? (
+          <span className="mgmt-composer-note">
+            No one is associated with this scope yet
+          </span>
+        ) : null}
 
         {categories.length > 0 ? (
           <label className="mgmt-composer-field">

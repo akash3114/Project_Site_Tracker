@@ -57,6 +57,8 @@ export const userSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email(),
   phone: z.string().max(30).optional(),
+  // Job title used as the assignee label ("Operations Manager", "Toll Manager").
+  title: z.string().max(100).optional(),
   password: z.string().min(6),
   isAdmin: z.boolean().default(false),
 });
@@ -64,6 +66,7 @@ export const userSchema = z.object({
 export const updateUserSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   phone: z.string().max(30).nullable().optional(),
+  title: z.string().max(100).nullable().optional(),
   isAdmin: z.boolean().optional(),
   active: z.boolean().optional(),
   password: z.string().min(6).optional(),
@@ -96,22 +99,103 @@ export const plazaAssignmentSchema = z.object({
   isPrimary: z.boolean().default(false),
 });
 
-export const createTaskSchema = z.object({
-  projectId: z.string().cuid().optional(),
+// A task belongs to exactly one scope: a project (optionally narrowed to a
+// plaza) or Head Office (optionally narrowed to a department). An empty scope
+// means Head Office level. Department ids can be non-cuid (e.g. `dept_admin`),
+// so they validate presence only. A plaza may arrive without its project; the
+// route resolves and stores the project before writing.
+const taskScopeObject = z.object({
+  projectId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
   plazaId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
-  categoryId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
-  title: z.string().min(3).max(200),
-  description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
-  assigneeId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
-  dueDate: z.preprocess(
-    emptyToUndefined,
-    z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
-      .optional(),
-  ),
+  departmentId: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
 });
+
+function taskScopeIssues(
+  value: {
+    projectId?: string;
+    plazaId?: string;
+    departmentId?: string;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.projectId && value.departmentId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Choose either a project or a department, not both",
+      path: ["departmentId"],
+    });
+  }
+
+  if (value.plazaId && value.departmentId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Choose either a plaza or a department, not both",
+      path: ["departmentId"],
+    });
+  }
+}
+
+export const taskScopeSchema = taskScopeObject.superRefine(taskScopeIssues);
+
+export const createTaskSchema = taskScopeObject
+  .extend({
+    categoryId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    title: z.string().min(3).max(200),
+    description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
+    priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
+    assigneeId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    dueDate: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+        .optional(),
+    ),
+  })
+  .superRefine(taskScopeIssues);
+
+/** Key used to reject duplicate scopes in a batch create. */
+function batchScopeKey(scope: {
+  projectId?: string;
+  plazaId?: string;
+  departmentId?: string;
+}): string {
+  if (scope.departmentId) return `department:${scope.departmentId}`;
+  if (scope.plazaId) return `plaza:${scope.plazaId}`;
+  if (scope.projectId) return `project:${scope.projectId}`;
+  return "head-office";
+}
+
+export const createTasksSchema = z
+  .object({
+    scopes: z.array(taskScopeSchema).min(1).max(50),
+    title: z.string().min(3).max(200),
+    description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
+    priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
+    assigneeId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    dueDate: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+        .optional(),
+    ),
+    categoryId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+  })
+  .superRefine((value, ctx) => {
+    const seen = new Set<string>();
+    value.scopes.forEach((scope, index) => {
+      const key = batchScopeKey(scope);
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate scope: ${key}`,
+          path: ["scopes", index],
+        });
+      }
+      seen.add(key);
+    });
+  });
 
 export const updateTaskSchema = z.object({
   title: z.string().min(3).max(200).optional(),

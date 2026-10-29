@@ -11,6 +11,8 @@ import {
 import type { TaskStatus } from "@prisma/client";
 
 import { fmtDate, fmtDateTimeIST, isOverdue } from "@/lib/format";
+import type { AssigneeCandidate } from "@/lib/assignee-groups";
+import { AssigneePicker } from "@/components/management/assignee-picker";
 import { ActivityFeed, type FeedEvent } from "./activity-feed";
 import {
   AttachmentList,
@@ -29,21 +31,27 @@ type TaskPriority = "LOW" | "MEDIUM" | "HIGH";
 
 type TaskDetail = {
   id: string;
-  projectId: string;
+  projectId: string | null;
   plazaId: string | null;
+  departmentId?: string | null;
   title: string;
   description?: string | null;
   status: TaskStatus;
   priority: string;
   dueDate?: string | null;
   completedAt?: string | null;
-  project: {
+  project?: {
     id: string;
     name: string;
     acronym?: string | null;
     round?: string | null;
     company: { id: string; name: string; code?: string | null };
-  };
+  } | null;
+  department?: {
+    id: string;
+    name: string;
+    code?: string | null;
+  } | null;
   plaza?: {
     id: string;
     name: string;
@@ -85,89 +93,7 @@ type TaskPermissions = {
   canDelete: boolean;
 };
 
-type CandidateRole =
-  | "ADMIN"
-  | "HEAD_OFFICE"
-  | "PROJECT_MANAGER"
-  | "SITE_MANAGER";
-
-/** Shape returned by GET /api/assignees and GET /api/tasks/:id. */
-type AssigneeCandidate = {
-  id: string;
-  name: string;
-  role?: CandidateRole | null;
-  department?: string | null;
-  office?: string | null;
-};
-
-type AssigneeGroup = {
-  key: string;
-  label: string;
-  rows: AssigneeCandidate[];
-};
-
 type CategoryOption = { id: string; name: string };
-
-const HEAD_OFFICE_FALLBACK = "Head Office";
-
-/**
- * Group candidates for the assignee picker: Administrators, one group per Head Office
- * department (alphabetical), then Project managers and Site managers. Empty
- * groups are dropped. Rows without a known role (the derived fallback list or
- * a task's current assignee) keep a trailing group so a selected value is
- * never lost.
- */
-function groupAssignees(rows: AssigneeCandidate[]): AssigneeGroup[] {
-  const admin: AssigneeCandidate[] = [];
-  const headOffice = new Map<string, AssigneeCandidate[]>();
-  const projectManagers: AssigneeCandidate[] = [];
-  const siteManagers: AssigneeCandidate[] = [];
-  const other: AssigneeCandidate[] = [];
-
-  for (const row of rows) {
-    if (row.role === "ADMIN") {
-      admin.push(row);
-    } else if (row.role === "HEAD_OFFICE") {
-      const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
-      const bucket = headOffice.get(department);
-      if (bucket) bucket.push(row);
-      else headOffice.set(department, [row]);
-    } else if (row.role === "PROJECT_MANAGER") {
-      projectManagers.push(row);
-    } else if (row.role === "SITE_MANAGER") {
-      siteManagers.push(row);
-    } else {
-      other.push(row);
-    }
-  }
-
-  const groups: AssigneeGroup[] = [
-    { key: "admin", label: "Administrators", rows: admin },
-    ...Array.from(headOffice.keys())
-      .sort((a, b) => a.localeCompare(b))
-      .map((department) => ({
-        key: `head-office:${department}`,
-        label: department,
-        rows: headOffice.get(department) ?? [],
-      })),
-    {
-      key: "project-managers",
-      label: "Project managers",
-      rows: projectManagers,
-    },
-    { key: "site-managers", label: "Site managers", rows: siteManagers },
-    { key: "other", label: "Other assignees", rows: other },
-  ];
-
-  return groups.filter((group) => group.rows.length > 0);
-}
-
-/** Native options are one line; HO department rides along as a tooltip. */
-function candidateTitle(row: AssigneeCandidate): string | undefined {
-  if (row.role !== "HEAD_OFFICE") return undefined;
-  const department = row.department?.trim() || HEAD_OFFICE_FALLBACK;
-  return `${row.name} · ${department}`;
-}
 
 const PRIORITIES: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"];
 
@@ -442,11 +368,6 @@ export function TaskDrawer({
     return rows;
   }, [apiAssignees, assignees, task?.assignee]);
 
-  const assigneeGroups = useMemo(
-    () => groupAssignees(assigneeOptions),
-    [assigneeOptions],
-  );
-
   const lastResolvedReopen = useMemo(() => {
     return (
       task?.reopenRequests?.find((request) => request.status !== "PENDING") ??
@@ -459,6 +380,10 @@ export function TaskDrawer({
   const completed = task?.status === "COMPLETED";
   const overdue = task ? isOverdue(task.dueDate, task.status) : false;
   const attachments = task?.attachments ?? [];
+  // Head Office scope = a department, or no project at all (Head Office level).
+  const headOffice = task
+    ? task.departmentId != null || task.projectId === null
+    : false;
 
   async function run(
     key: string,
@@ -679,27 +604,60 @@ export function TaskDrawer({
 
                 <nav aria-label="Task location">
                   <ol className="flex flex-wrap items-center gap-x-1 gap-y-1 font-mono text-xs text-[#586760]">
-                    <li>{task.project.company.name}</li>
-                    <li aria-hidden="true" className="text-[#CDD6CE]">
-                      ›
-                    </li>
-                    <li>
-                      {task.project.name}
-                      {task.project.acronym ? ` (${task.project.acronym})` : ""}
-                      {roundLabel(task.project.round)
-                        ? ` · ${roundLabel(task.project.round)}`
-                        : ""}
-                    </li>
-                    <li aria-hidden="true" className="text-[#CDD6CE]">
-                      ›
-                    </li>
-                    <li
-                      className={
-                        task.plaza ? "text-[#1C2824]" : "italic text-[#66756D]"
-                      }
-                    >
-                      {task.plaza?.name ?? "Project-level"}
-                    </li>
+                    {headOffice ? (
+                      <>
+                        <li>Head Office</li>
+                        {task.department ? (
+                          <>
+                            <li aria-hidden="true" className="text-[#CDD6CE]">
+                              ›
+                            </li>
+                            <li>{task.department.name}</li>
+                            <li aria-hidden="true" className="text-[#CDD6CE]">
+                              ›
+                            </li>
+                            <li className="text-[#1C2824]">Department-level</li>
+                          </>
+                        ) : (
+                          <>
+                            <li aria-hidden="true" className="text-[#CDD6CE]">
+                              ›
+                            </li>
+                            <li className="italic text-[#66756D]">
+                              Head Office-level
+                            </li>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <li>{task.project?.company?.name ?? "—"}</li>
+                        <li aria-hidden="true" className="text-[#CDD6CE]">
+                          ›
+                        </li>
+                        <li>
+                          {task.project?.name ?? "—"}
+                          {task.project?.acronym
+                            ? ` (${task.project.acronym})`
+                            : ""}
+                          {roundLabel(task.project?.round)
+                            ? ` · ${roundLabel(task.project?.round)}`
+                            : ""}
+                        </li>
+                        <li aria-hidden="true" className="text-[#CDD6CE]">
+                          ›
+                        </li>
+                        <li
+                          className={
+                            task.plaza
+                              ? "text-[#1C2824]"
+                              : "italic text-[#66756D]"
+                          }
+                        >
+                          {task.plaza?.name ?? "Project-level"}
+                        </li>
+                      </>
+                    )}
                   </ol>
                 </nav>
 
@@ -720,6 +678,12 @@ export function TaskDrawer({
                     <dt className={LABEL}>Created by</dt>
                     <dd className="truncate">{task.createdBy?.name ?? "—"}</dd>
                   </div>
+                  {task.department ? (
+                    <div className="min-w-0">
+                      <dt className={LABEL}>Department</dt>
+                      <dd className="truncate">{task.department.name}</dd>
+                    </div>
+                  ) : null}
                   <div className="min-w-0">
                     <dt className={LABEL}>Due</dt>
                     <dd
@@ -777,32 +741,15 @@ export function TaskDrawer({
                 <h3 className="font-display text-sm font-semibold text-[#1C2824]">
                   Assignee
                 </h3>
-                <label htmlFor="task-assignee" className="sr-only">
-                  Assignee
-                </label>
-                <select
-                  id="task-assignee"
-                  aria-label="Reassign task"
+                <AssigneePicker
+                  candidates={assigneeOptions}
+                  value={task.assignee?.id ?? null}
+                  onChange={(id) => changeAssignee(id ?? "")}
                   disabled={!permissions?.canAssign || busy !== null}
-                  value={task.assignee?.id ?? ""}
-                  onChange={(event) => changeAssignee(event.target.value)}
-                  className={`${FIELD} disabled:opacity-60`}
-                >
-                  <option value="">Unassigned</option>
-                  {assigneeGroups.map((group) => (
-                    <optgroup key={group.key} label={group.label}>
-                      {group.rows.map((row) => (
-                        <option
-                          key={row.id}
-                          value={row.id}
-                          title={candidateTitle(row)}
-                        >
-                          {row.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                  scopeKind={headOffice ? "department" : "project"}
+                  viewerId={me?.id ?? null}
+                  placeholder="Unassigned"
+                />
                 {!permissions?.canAssign ? (
                   <p className="font-mono text-[11px] text-[#66756D]">
                     {completed
