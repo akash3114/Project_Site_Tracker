@@ -33,6 +33,12 @@ const BUCKET_LABELS: Record<Bucket, string> = {
 /** Departments shown before the rail asks whether to expand. */
 const VISIBLE_DEPARTMENTS = 6;
 
+/**
+ * Search haystack for the fixed "All Head Office" row. Covers "all", "head",
+ * "office", "ho" and the full phrase.
+ */
+const HEAD_OFFICE_HAYSTACK = "all head office ho";
+
 export type PortfolioRailProps = {
   projects: MgmtProject[];
   departments: MgmtDepartment[];
@@ -170,6 +176,19 @@ export function PortfolioRail({
     .map((department) => department.id)
     .join("|");
 
+  // The "All Head Office" row is a fixed entry, not a department, so it has to
+  // be matched against its own haystack. Without this it shows up beside every
+  // department match but disappears when searched for by name.
+  const headOfficeRowMatches =
+    !needle || HEAD_OFFICE_HAYSTACK.includes(needle);
+  const headOfficeHasMatches =
+    headOfficeRowMatches || filteredDepartments.length > 0;
+  // During a search the header counts matching entries (the fixed row plus
+  // matching departments); otherwise it counts all active departments.
+  const headOfficeCount = needle
+    ? filteredDepartments.length + (headOfficeRowMatches ? 1 : 0)
+    : activeDepartments.length;
+
   /**
    * Collapsed by default. A search opens only the categories that hold
    * matches and keeps the rest closed, so results are visible without the
@@ -183,9 +202,8 @@ export function PortfolioRail({
     }
     const matches = new Set(matchingRounds ? matchingRounds.split("|") : []);
     setCollapsed(new Set(BUCKET_ORDER.filter((key) => !matches.has(key))));
-    setHoCollapsed(matchingDepartments.length === 0);
-  }, [needle, matchingRounds, matchingDepartments]);
-
+    setHoCollapsed(!headOfficeHasMatches);
+  }, [needle, matchingRounds, matchingDepartments, headOfficeHasMatches]);
 
   function toggleGroup(key: Bucket) {
     setCollapsed((previous) => {
@@ -230,31 +248,33 @@ export function PortfolioRail({
           >
             <span className="mgmt-rail-group-label">Head Office</span>
             <span className="mgmt-rail-group-count">
-              {activeDepartments.length}
+              {headOfficeCount}
             </span>
           </button>
 
           <div className="mgmt-rail-ho-body">
-            <div
-              className="mgmt-rail-ho-row"
-              data-selected={headOfficeSelected ? "true" : "false"}
-            >
-              <button
-                type="button"
-                className="mgmt-rail-ho-main"
-                aria-pressed={headOfficeSelected}
-                title="All Head Office — filter tasks"
-                onClick={() => onToggleScope("head-office")}
+            {headOfficeRowMatches ? (
+              <div
+                className="mgmt-rail-ho-row"
+                data-selected={headOfficeSelected ? "true" : "false"}
               >
-                <span className="mgmt-rail-acronym">HO</span>
-                <span className="mgmt-rail-copy">
-                  <span className="mgmt-rail-name">All Head Office</span>
-                  <span className="mgmt-rail-meta">
-                    {headOffice.open} open · {headOffice.total} tasks
+                <button
+                  type="button"
+                  className="mgmt-rail-ho-main"
+                  aria-pressed={headOfficeSelected}
+                  title="All Head Office — filter tasks"
+                  onClick={() => onToggleScope("head-office")}
+                >
+                  <span className="mgmt-rail-acronym">HO</span>
+                  <span className="mgmt-rail-copy">
+                    <span className="mgmt-rail-name">All Head Office</span>
+                    <span className="mgmt-rail-meta">
+                      {headOffice.open} open · {headOffice.total} tasks
+                    </span>
                   </span>
-                </span>
-              </button>
-            </div>
+                </button>
+              </div>
+            ) : null}
 
             {shownDepartments.map((department) => {
               const key = `department:${department.id}`;
@@ -313,7 +333,7 @@ export function PortfolioRail({
           </div>
         </div>
 
-        {needle && groups.length === 0 && filteredDepartments.length === 0 ? (
+        {needle && groups.length === 0 && !headOfficeHasMatches ? (
           <p className="mgmt-rail-empty" role="status">
             No projects or departments match “{query.trim()}”.
           </p>
@@ -417,10 +437,6 @@ export function PortfolioRail({
             </div>
           );
         })}
-
-        {groups.length === 0 && filteredDepartments.length === 0 ? (
-          <p className="mgmt-rail-empty">No projects match “{query}”.</p>
-        ) : null}
       </div>
 
       <div className="mgmt-rail-foot">
