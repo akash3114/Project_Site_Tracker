@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { PageHeader } from "@/components/page-header";
 import { TaskTable, type PlazaTaskItem } from "@/components/task-table";
 import { TaskDrawer } from "@/components/task-drawer";
 import type { AssigneeOption } from "@/components/task-filters";
@@ -16,7 +15,6 @@ function MyTasksInner() {
   const drawerTaskId = searchParams.get("task");
 
   const [tasks, setTasks] = useState<PlazaTaskItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +40,6 @@ function MyTasksInner() {
       };
       items.sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
       setTasks(items);
-      setTotal(data.total ?? items.length);
     } catch {
       setError("Failed to load. Retry.");
     } finally {
@@ -77,11 +74,6 @@ function MyTasksInner() {
   return (
     <>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
-          <PageHeader
-            overline="Assigned to you"
-            title="My tasks"
-            subtitle={`${total} assigned to me · overdue first`}
-          />
           {loading ? (
             <p className="text-sm text-[#586760]">Loading…</p>
           ) : error ? (

@@ -2,18 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { PageHeader } from "@/components/page-header";
 import { ProjectRegister } from "@/components/role-dashboards";
 import { TaskDrawer } from "@/components/task-drawer";
 import {
   EMPTY_FILTERS,
-  ROUND_LABELS,
-  ROUND_ORDER,
   type GroupBy,
   type MgmtPriority,
   type MgmtStatus,
   type MgmtTask,
-  type RoundKey,
   type TaskFilters,
   type ViewKey,
 } from "@/lib/management";
@@ -28,25 +24,6 @@ type Toast = { tone: "ok" | "error"; text: string };
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : "Update failed.";
-}
-
-/** "Rounds 1–4", or an explicit list when the rounds are not contiguous. */
-function roundScope(projects: { round?: string | null }[]): string {
-  const active = ROUND_ORDER.filter((round) =>
-    projects.some((project) => project.round === round),
-  );
-  if (active.length === 0) return "All rounds";
-  if (active.length === 1) return ROUND_LABELS[active[0] as RoundKey];
-  const numbers = active.map((round) => Number(round.slice(-1)));
-  const contiguous = numbers.every(
-    (number, index) => index === 0 || number === numbers[index - 1] + 1,
-  );
-  if (contiguous) {
-    return `Rounds ${numbers[0]}–${numbers[numbers.length - 1]}`;
-  }
-  return `Rounds ${numbers.slice(0, -1).join(", ")} & ${
-    numbers[numbers.length - 1]
-  }`;
 }
 
 export function ManagementWorkspace({ userId }: { userId: string }) {
@@ -192,44 +169,48 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
 
   return (
     <main className="cockpit-main mgmt-main">
-      <PageHeader
-        overline={`All work · ${roundScope(projects)}`}
-        title="Delivery overview"
-        subtitle="Tasks first. Triage, filter and file work without leaving this page."
-        action={
-          <div className="mgmt-header-actions">
-            <div className="mgmt-views" role="group" aria-label="Management view">
-              {(["tasks", "portfolio", "insights"] as const).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={view === key}
-                  onClick={() => setView(key)}
-                >
-                  {key === "tasks"
-                    ? "Tasks"
-                    : key === "portfolio"
-                      ? "Projects"
-                      : "Insights"}
-                </button>
-              ))}
-            </div>
-            <span className="cockpit-live">
-              <i aria-hidden="true" />
-              {refreshing
-                ? "Refreshing…"
-                : `Live · updated ${
-                    updatedAt
-                      ? updatedAt.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "—"
-                  }`}
-            </span>
+      <div className="mgmt-topbar">
+        <div className="mgmt-topbar-composer">
+          <CommandComposer
+            projects={projects}
+            plazas={plazas}
+            departments={departments}
+            focusSignal={focusSignal}
+            onCreated={handleCreated}
+          />
+        </div>
+        <div className="mgmt-topbar-controls">
+          <span className="cockpit-live">
+            <i aria-hidden="true" />
+            {refreshing
+              ? "Refreshing…"
+              : `Live · updated ${
+                  updatedAt
+                    ? updatedAt.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "—"
+                }`}
+          </span>
+          <div className="mgmt-views" role="group" aria-label="Management view">
+            {(["tasks", "portfolio", "insights"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={view === key}
+                onClick={() => setView(key)}
+              >
+                {key === "tasks"
+                  ? "Tasks"
+                  : key === "portfolio"
+                    ? "Projects"
+                    : "Insights"}
+              </button>
+            ))}
           </div>
-        }
-      />
+        </div>
+      </div>
 
       {showSkeleton ? (
         <div
@@ -256,15 +237,6 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
       ) : view === "tasks" ? (
         <div className="mgmt-workspace">
           <div className="mgmt-primary">
-            <div className="mgmt-command">
-              <CommandComposer
-                projects={projects}
-                plazas={plazas}
-                departments={departments}
-                focusSignal={focusSignal}
-                onCreated={handleCreated}
-              />
-            </div>
             <TaskCanvas
               tasks={tasks}
               userId={userId}
