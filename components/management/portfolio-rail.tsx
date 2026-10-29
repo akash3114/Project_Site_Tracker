@@ -60,6 +60,7 @@ export function PortfolioRail({
 }: PortfolioRailProps) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<Bucket>>(new Set());
+  const [hoCollapsed, setHoCollapsed] = useState(false);
   const [showAllDepartments, setShowAllDepartments] = useState(false);
 
   const stats = useMemo(() => {
@@ -186,88 +187,99 @@ export function PortfolioRail({
       </div>
 
       <div className="mgmt-rail-scroll">
-        <div className="mgmt-rail-ho" data-ho="true">
-          <div className="mgmt-rail-ho-head">
+        <div
+          className="mgmt-rail-ho"
+          data-ho="true"
+          data-collapsed={hoCollapsed ? "true" : "false"}
+        >
+          <button
+            type="button"
+            className="mgmt-rail-ho-head"
+            aria-expanded={!hoCollapsed}
+            onClick={() => setHoCollapsed((value) => !value)}
+          >
             <span className="mgmt-rail-group-label">Head Office</span>
             <span className="mgmt-rail-group-count">
               {activeDepartments.length}
             </span>
-          </div>
+          </button>
 
-          <div
-            className="mgmt-rail-ho-row"
-            data-selected={headOfficeSelected ? "true" : "false"}
-          >
-            <button
-              type="button"
-              className="mgmt-rail-ho-main"
-              aria-pressed={headOfficeSelected}
-              title="All Head Office — filter tasks"
-              onClick={() => onToggleScope("head-office")}
+          <div className="mgmt-rail-ho-body">
+            <div
+              className="mgmt-rail-ho-row"
+              data-selected={headOfficeSelected ? "true" : "false"}
             >
-              <span className="mgmt-rail-acronym">HO</span>
-              <span className="mgmt-rail-copy">
-                <span className="mgmt-rail-name">All Head Office</span>
-                <span className="mgmt-rail-meta">
-                  {headOffice.open} open · {headOffice.total} tasks
-                </span>
-              </span>
-            </button>
-          </div>
-
-          {shownDepartments.map((department) => {
-            const key = `department:${department.id}`;
-            const selected = selectedScopes.includes(key);
-            const percent = Math.max(
-              0,
-              Math.min(100, department.progressPct ?? 0),
-            );
-            return (
-              <div
-                key={department.id}
-                className="mgmt-rail-ho-row"
-                data-selected={selected ? "true" : "false"}
+              <button
+                type="button"
+                className="mgmt-rail-ho-main"
+                aria-pressed={headOfficeSelected}
+                title="All Head Office — filter tasks"
+                onClick={() => onToggleScope("head-office")}
               >
-                <button
-                  type="button"
-                  className="mgmt-rail-ho-main"
-                  aria-pressed={selected}
-                  title={`${department.name} — filter tasks`}
-                  onClick={() => onToggleScope(key)}
-                >
-                  <span className="mgmt-rail-acronym">
-                    {department.code?.trim() || "—"}
+                <span className="mgmt-rail-acronym">HO</span>
+                <span className="mgmt-rail-copy">
+                  <span className="mgmt-rail-name">All Head Office</span>
+                  <span className="mgmt-rail-meta">
+                    {headOffice.open} open · {headOffice.total} tasks
                   </span>
-                  <span className="mgmt-rail-copy">
-                    <span className="mgmt-rail-name">{department.name}</span>
-                    <span className="mgmt-rail-meta">
-                      {department.memberCount ?? 0} members ·{" "}
-                      {department.open ?? 0} open
-                    </span>
-                  </span>
-                </button>
-                <span
-                  className="mgmt-rail-progress mgmt-rail-ho-progress"
-                  aria-hidden="true"
-                >
-                  <i style={{ width: `${percent}%` }} />
                 </span>
-              </div>
-            );
-          })}
+              </button>
+            </div>
 
-          {filteredDepartments.length > VISIBLE_DEPARTMENTS ? (
-            <button
-              type="button"
-              className="mgmt-rail-ho-more"
-              aria-expanded={showAllDepartments}
-              onClick={() => setShowAllDepartments((value) => !value)}
-            >
-              {showAllDepartments
-                ? "Show fewer departments"
-                : `Show all ${filteredDepartments.length} departments`}
-            </button>
-          ) : null}
+            {shownDepartments.map((department) => {
+              const key = `department:${department.id}`;
+              const selected = selectedScopes.includes(key);
+              const percent = Math.max(
+                0,
+                Math.min(100, department.progressPct ?? 0),
+              );
+              return (
+                <div
+                  key={department.id}
+                  className="mgmt-rail-ho-row"
+                  data-selected={selected ? "true" : "false"}
+                >
+                  <button
+                    type="button"
+                    className="mgmt-rail-ho-main"
+                    aria-pressed={selected}
+                    title={`${department.name} — filter tasks`}
+                    onClick={() => onToggleScope(key)}
+                  >
+                    <span className="mgmt-rail-acronym">
+                      {department.code?.trim() || "—"}
+                    </span>
+                    <span className="mgmt-rail-copy">
+                      <span className="mgmt-rail-name">{department.name}</span>
+                      <span className="mgmt-rail-meta">
+                        {department.memberCount ?? 0} members ·{" "}
+                        {department.open ?? 0} open
+                      </span>
+                    </span>
+                  </button>
+                  <span
+                    className="mgmt-rail-progress mgmt-rail-ho-progress"
+                    aria-hidden="true"
+                  >
+                    <i style={{ width: `${percent}%` }} />
+                  </span>
+                </div>
+              );
+            })}
+
+            {filteredDepartments.length > VISIBLE_DEPARTMENTS ? (
+              <button
+                type="button"
+                className="mgmt-rail-ho-more"
+                aria-expanded={showAllDepartments}
+                onClick={() => setShowAllDepartments((value) => !value)}
+              >
+                {showAllDepartments
+                  ? "Show fewer departments"
+                  : `Show all ${filteredDepartments.length} departments`}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {groups.map((group) => {

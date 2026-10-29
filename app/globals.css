@@ -3737,13 +3737,25 @@
 
 .mgmt-rail-ho-head {
   display: flex;
+  width: 100%;
   min-height: 30px;
   align-items: center;
   gap: 6px;
   padding: 0 12px;
   margin-top: 4px;
+  border: 0;
   background: #eef4ea;
   color: var(--c-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mgmt-rail-ho-head:hover {
+  background: #e7efe2;
+}
+
+.mgmt-rail-ho[data-collapsed="true"] .mgmt-rail-ho-body {
+  display: none;
 }
 
 .mgmt-rail-ho-row {
