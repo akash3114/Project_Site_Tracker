@@ -3807,6 +3807,14 @@
   background: #eef4ea;
 }
 
+.mgmt-rail-empty {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--c-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 /* Head Office card in Insights. */
 
 .mgmt-insight-ho {

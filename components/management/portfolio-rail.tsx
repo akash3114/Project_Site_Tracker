@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { isOverdue } from "@/lib/format";
 import {
@@ -59,8 +59,10 @@ export function PortfolioRail({
   onViewAll,
 }: PortfolioRailProps) {
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<Bucket>>(new Set());
-  const [hoCollapsed, setHoCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<Bucket>>(
+    () => new Set(BUCKET_ORDER),
+  );
+  const [hoCollapsed, setHoCollapsed] = useState(true);
   const [showAllDepartments, setShowAllDepartments] = useState(false);
 
   const stats = useMemo(() => {
@@ -116,29 +118,33 @@ export function PortfolioRail({
     [departments],
   );
 
+  const needle = query.trim().toLowerCase();
+
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     if (!needle) return projects;
     return projects.filter((project) =>
       `${project.name} ${project.acronym ?? ""} ${project.company?.name ?? ""}`
         .toLowerCase()
         .includes(needle),
     );
-  }, [projects, query]);
+  }, [projects, needle]);
 
   const filteredDepartments = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     if (!needle) return activeDepartments;
     return activeDepartments.filter((department) =>
       `${department.name} ${department.code ?? ""}`
         .toLowerCase()
         .includes(needle),
     );
-  }, [activeDepartments, query]);
+  }, [activeDepartments, needle]);
 
-  const shownDepartments = showAllDepartments
+  // While searching, every matching department is shown; otherwise the list is
+  // capped so the rail stays short.
+  const shownDepartments = needle
     ? filteredDepartments
-    : filteredDepartments.slice(0, VISIBLE_DEPARTMENTS);
+    : showAllDepartments
+      ? filteredDepartments
+      : filteredDepartments.slice(0, VISIBLE_DEPARTMENTS);
 
   const groups = useMemo(() => {
     const byRound = new Map<Bucket, MgmtProject[]>();
@@ -156,6 +162,30 @@ export function PortfolioRail({
       ),
     }));
   }, [filtered]);
+
+  // Stable dependency keys so the effect re-runs when the match set changes,
+  // not on every render of the derived arrays.
+  const matchingRounds = groups.map((group) => group.key).join("|");
+  const matchingDepartments = filteredDepartments
+    .map((department) => department.id)
+    .join("|");
+
+  /**
+   * Collapsed by default. A search opens only the categories that hold
+   * matches and keeps the rest closed, so results are visible without the
+   * full register spilling open. Clearing the query returns to the default.
+   */
+  useEffect(() => {
+    if (!needle) {
+      setCollapsed(new Set(BUCKET_ORDER));
+      setHoCollapsed(true);
+      return;
+    }
+    const matches = new Set(matchingRounds ? matchingRounds.split("|") : []);
+    setCollapsed(new Set(BUCKET_ORDER.filter((key) => !matches.has(key))));
+    setHoCollapsed(matchingDepartments.length === 0);
+  }, [needle, matchingRounds, matchingDepartments]);
+
 
   function toggleGroup(key: Bucket) {
     setCollapsed((previous) => {
@@ -267,7 +297,8 @@ export function PortfolioRail({
               );
             })}
 
-            {filteredDepartments.length > VISIBLE_DEPARTMENTS ? (
+            {!needle &&
+            filteredDepartments.length > VISIBLE_DEPARTMENTS ? (
               <button
                 type="button"
                 className="mgmt-rail-ho-more"
@@ -281,6 +312,12 @@ export function PortfolioRail({
             ) : null}
           </div>
         </div>
+
+        {needle && groups.length === 0 && filteredDepartments.length === 0 ? (
+          <p className="mgmt-rail-empty" role="status">
+            No projects or departments match “{query.trim()}”.
+          </p>
+        ) : null}
 
         {groups.map((group) => {
           const isCollapsed = collapsed.has(group.key);
