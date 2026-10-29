@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, TaskScopeKind } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import {
@@ -12,6 +12,7 @@ import {
   taskScopeWhere,
   type SessionUser,
 } from "@/lib/access";
+import { todayIst } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { taskInclude } from "@/lib/task-data";
 import type { TaskScope } from "@/lib/task-scope";
@@ -33,6 +34,14 @@ type ResolvedScope = {
   departmentName: string | null;
   scope: TaskScope;
 };
+
+/** The stored discriminator for a resolved scope. */
+function scopeKindOf(resolved: ResolvedScope): TaskScopeKind {
+  if (resolved.departmentId !== null) return "DEPARTMENT";
+  if (resolved.plazaId !== null) return "PLAZA";
+  if (resolved.projectId !== null) return "PROJECT";
+  return "HEAD_OFFICE";
+}
 
 type TaskInput = {
   title: string;
@@ -190,6 +199,7 @@ async function createScopedTask(
 ) {
   const created = await tx.task.create({
     data: {
+      scope: scopeKindOf(resolved),
       projectId: resolved.projectId,
       plazaId: resolved.plazaId,
       departmentId: resolved.departmentId,
@@ -280,7 +290,7 @@ export async function GET(req: Request): Promise<Response> {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       constraints.push({
-        OR: [{ departmentId: { not: null } }, { projectId: null }],
+        scope: { in: ["DEPARTMENT", "HEAD_OFFICE"] },
       });
     }
 
@@ -294,9 +304,7 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     if (overdue) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      constraints.push({ dueDate: { lt: today } });
+      constraints.push({ dueDate: { lt: todayIst() } });
       constraints.push({ status: { not: "COMPLETED" } });
     } else if (status && (TASK_STATUSES as readonly string[]).includes(status)) {
       constraints.push({ status: status as (typeof TASK_STATUSES)[number] });

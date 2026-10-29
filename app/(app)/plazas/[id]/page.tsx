@@ -24,15 +24,15 @@ type PlazaDetail = {
   id: string;
   name: string;
   lengthKm?: number | null;
-  state?: string | null;
-  piu?: string | null;
-  ro?: string | null;
   active?: boolean;
   status?: PlazaStatus;
   project?: {
     id: string;
     name: string;
     acronym?: string | null;
+    state?: string | null;
+    piu?: string | null;
+    ro?: string | null;
     company?: { id: string; name: string; code?: string | null } | null;
   } | null;
   projectId?: string;
@@ -44,10 +44,10 @@ function plazaMeta(plaza: PlazaDetail): string {
   const parts: string[] = [];
   if (plaza.project?.name) parts.push(plaza.project.name);
   if (plaza.project?.company?.name) parts.push(plaza.project.company.name);
-  if (plaza.state) parts.push(plaza.state);
+  if (plaza.project?.state) parts.push(plaza.project.state);
   if (typeof plaza.lengthKm === "number") parts.push(`${plaza.lengthKm} km`);
-  if (plaza.piu) parts.push(`PIU ${plaza.piu}`);
-  if (plaza.ro) parts.push(`RO ${plaza.ro}`);
+  if (plaza.project?.piu) parts.push(`PIU ${plaza.project.piu}`);
+  if (plaza.project?.ro) parts.push(`RO ${plaza.project.ro}`);
   return parts.join(" · ");
 }
 

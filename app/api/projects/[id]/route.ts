@@ -6,6 +6,7 @@ import {
   requireProjectAccess,
   taskScopeWhere,
 } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { projectStats } from "@/lib/stats";
 import { updateProjectSchema } from "@/lib/validations";
@@ -84,32 +85,54 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
     }
   }
 
-  const updated = await db.project.update({
-    where: { id: params.id },
-    data: {
-      ...(parsed.data.companyId !== undefined
-        ? { companyId: parsed.data.companyId }
-        : {}),
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.acronym !== undefined
-        ? { acronym: parsed.data.acronym ?? null }
-        : {}),
-      ...(parsed.data.round !== undefined ? { round: parsed.data.round } : {}),
-      ...(parsed.data.state !== undefined
-        ? { state: parsed.data.state ?? null }
-        : {}),
-      ...(parsed.data.lengthKm !== undefined
-        ? { lengthKm: parsed.data.lengthKm ?? null }
-        : {}),
-      ...(parsed.data.piu !== undefined
-        ? { piu: parsed.data.piu ?? null }
-        : {}),
-      ...(parsed.data.ro !== undefined ? { ro: parsed.data.ro ?? null } : {}),
-      ...(parsed.data.active !== undefined
-        ? { active: parsed.data.active }
-        : {}),
-    },
-    include: { company: { select: { id: true, name: true, code: true } } },
+  const updated = await db.$transaction(async (tx) => {
+    const next = await tx.project.update({
+      where: { id: params.id },
+      data: {
+        ...(parsed.data.companyId !== undefined
+          ? { companyId: parsed.data.companyId }
+          : {}),
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.acronym !== undefined
+          ? { acronym: parsed.data.acronym ?? null }
+          : {}),
+        ...(parsed.data.round !== undefined ? { round: parsed.data.round } : {}),
+        ...(parsed.data.state !== undefined
+          ? { state: parsed.data.state ?? null }
+          : {}),
+        ...(parsed.data.lengthKm !== undefined
+          ? { lengthKm: parsed.data.lengthKm ?? null }
+          : {}),
+        ...(parsed.data.piu !== undefined
+          ? { piu: parsed.data.piu ?? null }
+          : {}),
+        ...(parsed.data.ro !== undefined ? { ro: parsed.data.ro ?? null } : {}),
+        ...(parsed.data.active !== undefined
+          ? { active: parsed.data.active }
+          : {}),
+      },
+      include: { company: { select: { id: true, name: true, code: true } } },
+    });
+    const keys = [
+      "companyId",
+      "name",
+      "acronym",
+      "round",
+      "state",
+      "lengthKm",
+      "piu",
+      "ro",
+      "active",
+    ];
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "Project",
+      entityId: next.id,
+      action: parsed.data.active === false ? "ARCHIVE" : "UPDATE",
+      before: snapshot(project, keys),
+      after: snapshot(next, keys),
+    });
+    return next;
   });
 
   return NextResponse.json(updated);

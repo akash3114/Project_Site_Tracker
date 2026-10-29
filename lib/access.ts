@@ -32,6 +32,7 @@ export type ScopeRole =
 
 export type TaskWithScope = Pick<
   Task,
+  | "scope"
   | "projectId"
   | "plazaId"
   | "departmentId"
@@ -334,6 +335,7 @@ export async function requireTaskAccess(
     where: { id: taskId },
     select: {
       id: true,
+      scope: true,
       projectId: true,
       plazaId: true,
       departmentId: true,
@@ -367,10 +369,6 @@ export function canManageCategories(user: SessionUser): boolean {
 
 export function canViewAudit(user: SessionUser): boolean {
   return user.isAdmin || user.role === "HEAD_OFFICE";
-}
-
-export function canDeleteProject(user: SessionUser): boolean {
-  return user.isAdmin;
 }
 
 /** Core field edits: creator, PM, HO, Admin. Completed tasks lock edits. */

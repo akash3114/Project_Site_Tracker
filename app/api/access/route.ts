@@ -4,6 +4,7 @@ import {
   canManageProjects,
   getSessionUser,
 } from "@/lib/access";
+import { logAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { accessPutSchema } from "@/lib/validations";
 
@@ -79,6 +80,11 @@ export async function PUT(req: Request): Promise<Response> {
   }
 
   await db.$transaction(async (tx) => {
+    const before = await tx.plazaAssignment.findMany({
+      where: { userId: parsed.data.userId },
+      select: { plazaId: true, role: true, isPrimary: true },
+      orderBy: [{ plazaId: "asc" }, { role: "asc" }],
+    });
     await tx.plazaAssignment.deleteMany({
       where: { userId: parsed.data.userId },
     });
@@ -93,6 +99,25 @@ export async function PUT(req: Request): Promise<Response> {
         },
       });
     }
+    const after = Array.from(deduped.values())
+      .map((row) => ({
+        plazaId: row.plazaId,
+        role: row.role,
+        isPrimary: row.isPrimary,
+      }))
+      .sort((a, b) =>
+        a.plazaId === b.plazaId
+          ? a.role.localeCompare(b.role)
+          : a.plazaId.localeCompare(b.plazaId),
+      );
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "PlazaAssignment",
+      entityId: parsed.data.userId,
+      action: "UPDATE",
+      before,
+      after,
+    });
   });
 
   return NextResponse.json({ ok: true, count: deduped.size });

@@ -55,10 +55,7 @@ type TaskDetail = {
   plaza?: {
     id: string;
     name: string;
-    state?: string | null;
     lengthKm?: number | null;
-    piu?: string | null;
-    ro?: string | null;
   } | null;
   category?: { id: string; name: string } | null;
   assignee?: Person | null;
@@ -90,7 +87,7 @@ type TaskPermissions = {
   canApproveReopen: boolean;
   canComment: boolean;
   canUpload: boolean;
-  canDelete: boolean;
+  canAdminDelete: boolean;
 };
 
 type CategoryOption = { id: string; name: string };
@@ -522,7 +519,7 @@ export function TaskDrawer({
     Boolean(permissions?.canRequestReopen);
   const canCancelPending =
     Boolean(pendingReopen) &&
-    (Boolean(permissions?.canDelete) ||
+    (Boolean(permissions?.canAdminDelete) ||
       Boolean(me?.id && pendingReopen?.requestedBy?.id === me.id));
   const reasonReady = reopenReason.trim().length >= 10;
 
@@ -698,10 +695,11 @@ export function TaskDrawer({
                     <dt className={LABEL}>Created</dt>
                     <dd>{fmtDate(task.createdAt)}</dd>
                   </div>
-                  {task.plaza?.state ? (
+                  {task.plaza?.lengthKm !== null &&
+                  task.plaza?.lengthKm !== undefined ? (
                     <div className="min-w-0">
-                      <dt className={LABEL}>State</dt>
-                      <dd className="truncate">{task.plaza.state}</dd>
+                      <dt className={LABEL}>Length</dt>
+                      <dd className="truncate">{task.plaza.lengthKm} km</dd>
                     </div>
                   ) : null}
                   {completed ? (
@@ -1079,7 +1077,7 @@ export function TaskDrawer({
                 <AttachmentList
                   attachments={attachments}
                   currentUserId={me?.id ?? null}
-                  canDeleteAny={Boolean(permissions?.canDelete)}
+                  canDeleteAny={Boolean(permissions?.canAdminDelete)}
                   onChanged={() =>
                     void afterAttachmentChange("Attachment deleted")
                   }

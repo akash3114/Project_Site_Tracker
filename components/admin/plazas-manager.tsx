@@ -24,9 +24,6 @@ type PlazaItem = {
   } | null;
   name: string;
   lengthKm: number | null;
-  state: string | null;
-  piu: string | null;
-  ro: string | null;
   active: boolean;
   task: { total: number; completed: number; blocked: number; overdue: number };
   progressPct: number;
@@ -55,9 +52,6 @@ const emptyForm = {
   projectId: "",
   name: "",
   lengthKm: "",
-  state: "",
-  piu: "",
-  ro: "",
   active: true,
 };
 
@@ -188,9 +182,6 @@ export function PlazasManager() {
           ...(lengthKm !== undefined ? { lengthKm } : null),
           ...clean({
             name: form.name,
-            state: form.state,
-            piu: form.piu,
-            ro: form.ro,
           }),
         }),
       });
@@ -354,33 +345,6 @@ export function PlazasManager() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
-            State
-            <input
-              className={inputCls}
-              value={form.state}
-              onChange={(e) => setForm({ ...form, state: e.target.value })}
-              placeholder="Madhya Pradesh"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
-            PIU
-            <input
-              className={inputCls}
-              value={form.piu}
-              onChange={(e) => setForm({ ...form, piu: e.target.value })}
-              placeholder="Jabalpur"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
-            RO
-            <input
-              className={inputCls}
-              value={form.ro}
-              onChange={(e) => setForm({ ...form, ro: e.target.value })}
-              placeholder="Bhopal"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
             Status
             <select
               className={inputCls}
@@ -430,9 +394,6 @@ export function PlazasManager() {
                 <th className={thCls}>Company</th>
                 <th className={thCls}>Project</th>
                 <th className={thCls}>Length</th>
-                <th className={thCls}>State</th>
-                <th className={thCls}>PIU</th>
-                <th className={thCls}>RO</th>
                 <th className={thCls}>Status</th>
                 <th className={thCls}>Tasks</th>
                 <th className={thCls}>Done</th>
@@ -468,9 +429,6 @@ export function PlazasManager() {
                   <td className={tdCls}>
                     {typeof z.lengthKm === "number" ? `${z.lengthKm} km` : "—"}
                   </td>
-                  <td className={tdCls}>{z.state ?? "—"}</td>
-                  <td className={tdCls}>{z.piu ?? "—"}</td>
-                  <td className={tdCls}>{z.ro ?? "—"}</td>
                   <td className={tdCls}>
                     {editingId === z.id ? (
                       <select

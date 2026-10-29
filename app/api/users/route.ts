@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 
 import { getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import type { Role } from "@/lib/labels";
 import { userSchema } from "@/lib/validations";
@@ -121,27 +122,37 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Email already in use" }, { status: 409 });
   }
 
-  const created = await db.user.create({
-    data: {
-      name: parsed.data.name,
-      email,
-      phone: parsed.data.phone ?? null,
-      title: parsed.data.title?.trim() || null,
-      passwordHash: await bcrypt.hash(parsed.data.password, 12),
-      isAdmin: parsed.data.isAdmin,
-      active: true,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      title: true,
-      isAdmin: true,
-      active: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  const created = await db.$transaction(async (tx) => {
+    const next = await tx.user.create({
+      data: {
+        name: parsed.data.name,
+        email,
+        phone: parsed.data.phone ?? null,
+        title: parsed.data.title?.trim() || null,
+        passwordHash: await bcrypt.hash(parsed.data.password, 12),
+        isAdmin: parsed.data.isAdmin,
+        active: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        title: true,
+        isAdmin: true,
+        active: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "User",
+      entityId: next.id,
+      action: "CREATE",
+      after: snapshot(next, ["name", "email", "phone", "title", "isAdmin", "active"]),
+    });
+    return next;
   });
 
   return NextResponse.json(

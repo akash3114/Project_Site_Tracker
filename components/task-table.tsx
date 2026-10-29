@@ -25,10 +25,7 @@ export type PlazaTaskItem = {
   plaza?: {
     id: string;
     name: string;
-    state?: string | null;
     lengthKm?: number | null;
-    piu?: string | null;
-    ro?: string | null;
     project?: { id: string; name: string } | null;
   } | null;
   category?: { id: string; name: string } | null;

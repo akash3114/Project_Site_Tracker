@@ -6,6 +6,8 @@ import {
   requirePlazaAccess,
   taskScopeWhere,
 } from "@/lib/access";
+import { todayIst } from "@/lib/dates";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { plazaProgress } from "@/lib/progress";
 import { updatePlazaSchema } from "@/lib/validations";
@@ -25,6 +27,9 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
           id: true,
           name: true,
           acronym: true,
+          state: true,
+          piu: true,
+          ro: true,
           company: { select: { id: true, name: true, code: true } },
         },
       },
@@ -34,8 +39,7 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
 
   await requirePlazaAccess(user, plaza.id);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayIst();
   const scope = await taskScopeWhere(user);
   const base = { AND: [scope, { plazaId: plaza.id }] };
   const [total, completed, blocked, overdue] = await Promise.all([
@@ -61,9 +65,6 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
     projectId: plaza.projectId,
     project: plaza.project,
     name: plaza.name,
-    state: plaza.state,
-    piu: plaza.piu,
-    ro: plaza.ro,
     lengthKm: plaza.lengthKm,
     active: plaza.active,
     status: plaza.active ? "ACTIVE" : "ARCHIVED",
@@ -92,34 +93,38 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
   const plaza = await db.plaza.findUnique({ where: { id: params.id } });
   if (!plaza) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const updated = await db.plaza.update({
-    where: { id: params.id },
-    data: {
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.state !== undefined
-        ? { state: parsed.data.state ?? null }
-        : {}),
-      ...(parsed.data.piu !== undefined
-        ? { piu: parsed.data.piu ?? null }
-        : {}),
-      ...(parsed.data.ro !== undefined ? { ro: parsed.data.ro ?? null } : {}),
-      ...(parsed.data.lengthKm !== undefined
-        ? { lengthKm: parsed.data.lengthKm ?? null }
-        : {}),
-      ...(parsed.data.active !== undefined
-        ? { active: parsed.data.active }
-        : {}),
-    },
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-          acronym: true,
-          company: { select: { id: true, name: true, code: true } },
+  const updated = await db.$transaction(async (tx) => {
+    const next = await tx.plaza.update({
+      where: { id: params.id },
+      data: {
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.lengthKm !== undefined
+          ? { lengthKm: parsed.data.lengthKm ?? null }
+          : {}),
+        ...(parsed.data.active !== undefined
+          ? { active: parsed.data.active }
+          : {}),
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            acronym: true,
+            company: { select: { id: true, name: true, code: true } },
+          },
         },
       },
-    },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "Plaza",
+      entityId: next.id,
+      action: parsed.data.active === false ? "ARCHIVE" : "UPDATE",
+      before: snapshot(plaza, ["projectId", "name", "lengthKm", "active"]),
+      after: snapshot(next, ["projectId", "name", "lengthKm", "active"]),
+    });
+    return next;
   });
 
   return NextResponse.json(updated);

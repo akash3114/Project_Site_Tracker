@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { startOfWeekIst } from "@/lib/dates";
 import { isOverdue } from "@/lib/format";
 import {
   ROUND_LABELS,
@@ -182,11 +183,7 @@ export function Insights({
   );
 
   const completedWeek = useMemo(() => {
-    const start = new Date(now);
-    start.setUTCHours(0, 0, 0, 0);
-    const weekday = start.getUTCDay();
-    start.setUTCDate(start.getUTCDate() - ((weekday + 6) % 7));
-    const startMs = start.getTime();
+    const startMs = startOfWeekIst(now).getTime();
     return tasks.filter((task) => {
       if (!isCompleted(task) || !task.completedAt) return false;
       return new Date(task.completedAt).getTime() >= startMs;

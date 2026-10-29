@@ -24,10 +24,7 @@ export const taskInclude = {
     select: {
       id: true,
       name: true,
-      state: true,
       lengthKm: true,
-      piu: true,
-      ro: true,
     },
   },
   category: { select: { id: true, name: true } },
@@ -79,7 +76,12 @@ export type TaskPermissions = {
   canApproveReopen: boolean;
   canComment: boolean;
   canUpload: boolean;
-  canDelete: boolean;
+  /**
+   * Admin-only override for the two reversible deletes the UI offers:
+   * removing an attachment and cancelling another person's pending reopen
+   * request. Tasks themselves are never deleted.
+   */
+  canAdminDelete: boolean;
 };
 
 export function taskPermissions(
@@ -87,6 +89,7 @@ export function taskPermissions(
   task: Pick<
     Task,
     | "status"
+    | "scope"
     | "projectId"
     | "plazaId"
     | "departmentId"
@@ -95,6 +98,7 @@ export function taskPermissions(
   >,
   role: ScopeRole,
 ): TaskPermissions {
+  const projectScoped = task.scope === "PROJECT" || task.scope === "PLAZA";
   return {
     canEdit: canEditTaskCore(user, task, role),
     canChangeStatus: canChangeTaskStatus(task, role),
@@ -102,15 +106,13 @@ export function taskPermissions(
     // (re)assigned by Admin or HO. Project tasks keep the existing ceiling.
     canAssign:
       task.status !== "COMPLETED" &&
-      ((task.departmentId === null && task.projectId !== null) ||
-        role === "ADMIN" ||
-        role === "HEAD_OFFICE"),
+      (projectScoped || role === "ADMIN" || role === "HEAD_OFFICE"),
     canReopenDirect: task.status === "COMPLETED" && canReopenDirectly(role),
     canRequestReopen: canRequestReopen(task, role),
     canApproveReopen: canApproveReopen(role),
     canComment: true,
     canUpload: true,
-    canDelete: role === "ADMIN",
+    canAdminDelete: role === "ADMIN",
   };
 }
 

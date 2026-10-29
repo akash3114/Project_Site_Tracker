@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { categorySchema } from "@/lib/validations";
 
@@ -49,8 +50,18 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const created = await db.taskCategory.create({
-    data: { name: parsed.data.name, active: parsed.data.active ?? true },
+  const created = await db.$transaction(async (tx) => {
+    const category = await tx.taskCategory.create({
+      data: { name: parsed.data.name, active: parsed.data.active ?? true },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "TaskCategory",
+      entityId: category.id,
+      action: "CREATE",
+      after: snapshot(category, ["name", "active"]),
+    });
+    return category;
   });
   return NextResponse.json(created, { status: 201 });
 }

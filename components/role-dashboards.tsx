@@ -535,7 +535,7 @@ function ManagerWorkbench() {
               <div className="cockpit-site-list">
                 {plazas.map((plaza) => (
                   <Link className="cockpit-site-row" href={`/plazas/${plaza.id}`} key={plaza.id}>
-                    <span className="site-title"><strong>{plaza.name}</strong><small>{plaza.project?.name ?? "Project"}{plaza.state ? ` · ${plaza.state}` : ""}</small></span>
+                    <span className="site-title"><strong>{plaza.name}</strong><small>{plaza.project?.name ?? "Project"}</small></span>
                     <span className="site-risks">
                       <span>{plaza.task.completed}/{plaza.task.total} done</span>
                       {plaza.task.overdue > 0 ? <strong className="risk">{plaza.task.overdue} overdue</strong> : null}

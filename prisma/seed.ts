@@ -24,6 +24,21 @@ function slug(name: string): string {
   return base || "user";
 }
 
+/** Lowercase, collapse runs of non-alphanumerics, trim the separator. */
+function refSlug(value: string, separator: "-" | "_" = "-"): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, separator)
+    .replace(new RegExp(`^\\${separator}+|\\${separator}+$`, "g"), "");
+}
+
+// Reference/catalogue rows use stable slugs so every environment is identical
+// (see prisma/schema.prisma conventions and docs/DATABASE.md).
+const departmentIdFor = (code: string) => `dept_${refSlug(code)}`;
+const officeIdFor = (name: string) => `office_${refSlug(name)}`;
+const companyIdFor = (code: string) => `company_${refSlug(code)}`;
+const categoryIdFor = (name: string) => `cat_${refSlug(name, "_")}`;
+
 function roundEnum(n: number): "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4" {
   if (n === 2) return "ROUND_2";
   if (n === 3) return "ROUND_3";
@@ -201,6 +216,7 @@ const HEAD_OFFICE_TASKS: {
 async function main(): Promise<void> {
   // Fresh pilot data: wipe in FK-safe order, then rebuild from master-data.md.
   if (process.env.SEED_RESET === "1") {
+    await db.auditLog.deleteMany();
     await db.taskAttachment.deleteMany();
     await db.taskActivity.deleteMany();
     await db.taskReopenRequest.deleteMany();
@@ -229,9 +245,9 @@ async function main(): Promise<void> {
   }
 
   // ---- Head Office catalogue --------------------------------------------
-  // Upserted by their natural keys: the migration already created Admin /
-  // Delhi / Mumbai with fixed ids and the backfilled memberships point at
-  // them, so these rows must survive (and the ids must not change).
+  // Upserted by their natural keys and created with stable slug ids. The
+  // migration rewrites any older cuid/`dept_*` ids to the same slugs, so these
+  // rows survive a reseed with their ids intact.
   const departmentIdByCode = new Map<string, string>();
   for (const masterDepartment of MASTER_DEPARTMENTS) {
     const department = await db.department.upsert({
@@ -242,6 +258,7 @@ async function main(): Promise<void> {
         active: true,
       },
       create: {
+        id: departmentIdFor(masterDepartment.code),
         name: masterDepartment.name,
         code: masterDepartment.code,
         sortOrder: masterDepartment.sortOrder,
@@ -257,6 +274,7 @@ async function main(): Promise<void> {
       where: { name: masterOffice.name },
       update: { city: masterOffice.city || null, active: true },
       create: {
+        id: officeIdFor(masterOffice.name),
         name: masterOffice.name,
         city: masterOffice.city || null,
         active: true,
@@ -302,6 +320,7 @@ async function main(): Promise<void> {
   for (const masterCompany of MASTER_COMPANIES) {
     const company = await db.company.create({
       data: {
+        id: companyIdFor(masterCompany.code),
         name: masterCompany.name,
         code: masterCompany.code,
         active: true,
@@ -334,9 +353,6 @@ async function main(): Promise<void> {
           data: {
             projectId: project.id,
             name: masterPlaza.name,
-            state: masterProject.state || null,
-            piu: null,
-            ro: null,
             lengthKm: masterPlaza.lengthKm,
             active: true,
           },
@@ -490,7 +506,9 @@ async function main(): Promise<void> {
   // ---- Categories --------------------------------------------------------
   const categories = await Promise.all(
     CATEGORY_NAMES.map((name) =>
-      db.taskCategory.create({ data: { name, active: true } }),
+      db.taskCategory.create({
+        data: { id: categoryIdFor(name), name, active: true },
+      }),
     ),
   );
 
@@ -554,6 +572,7 @@ async function main(): Promise<void> {
 
     const task = await db.task.create({
       data: {
+        scope: plaza ? "PLAZA" : "PROJECT",
         projectId: project.id,
         plazaId: plaza?.id ?? null,
         categoryId: categories[i % categories.length].id,
@@ -672,6 +691,7 @@ async function main(): Promise<void> {
 
     const task = await db.task.create({
       data: {
+        scope: "DEPARTMENT",
         projectId: null,
         plazaId: null,
         departmentId,

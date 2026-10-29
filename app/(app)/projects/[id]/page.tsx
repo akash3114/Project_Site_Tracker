@@ -33,9 +33,6 @@ type ProjectDetail = {
 type PlazaRow = {
   id: string;
   name: string;
-  state?: string | null;
-  piu?: string | null;
-  ro?: string | null;
   lengthKm?: number | null;
   active: boolean;
   status: string;
@@ -59,12 +56,15 @@ function roundLabel(round: string | null | undefined): string {
   return round.replace(/^ROUND_/, "Round ");
 }
 
-function plazaRowMeta(z: PlazaRow): string {
+function plazaRowMeta(
+  z: PlazaRow,
+  project: ProjectDetail | null,
+): string {
   const parts: string[] = [];
-  if (z.state) parts.push(z.state);
+  if (project?.state) parts.push(project.state);
   if (typeof z.lengthKm === "number") parts.push(`${z.lengthKm} km`);
-  if (z.piu) parts.push(`PIU ${z.piu}`);
-  if (z.ro) parts.push(`RO ${z.ro}`);
+  if (project?.piu) parts.push(`PIU ${project.piu}`);
+  if (project?.ro) parts.push(`RO ${project.ro}`);
   return parts.join(" · ");
 }
 
@@ -293,8 +293,8 @@ export default function ProjectPage() {
                         Archived
                       </span>
                     ) : null}
-                    {plazaRowMeta(z) ? (
-                      <span className="font-mono text-xs text-[#66756D]">{plazaRowMeta(z)}</span>
+                    {plazaRowMeta(z, project) ? (
+                      <span className="font-mono text-xs text-[#66756D]">{plazaRowMeta(z, project)}</span>
                     ) : null}
                     <span className="ml-auto font-mono text-xs text-[#586760]">
                       {z.task.completed}/{z.task.total}
