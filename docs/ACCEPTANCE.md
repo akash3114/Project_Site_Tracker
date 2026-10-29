@@ -39,7 +39,8 @@ Tester: ______________  Date: __________  Env: __________ (VM/dev)  Seed: 3/28/4
 - [ ] No "Recent" section appears in the scope or assignee pickers
 - [ ] Assignee dropdown lists only people associated with the selected project, plaza or department (plus yourself) and refreshes when the scope changes
 - [ ] Assignee rows show designation/context first and the person's name second
-- [ ] The scope picker's bulk actions (`Select all projects`, `Select all departments`, `Clear`, `N selected`) sit at the top of the dropdown, above the scrolling list
+- [ ] The scope picker's bulk actions (`Select all projects`, `Select all HO departments`, `Clear`, `N selected`) sit at the top of the dropdown, above the scrolling list
+- [ ] `Select all HO departments` selects the department rows only; the Head Office level row is a separate scope and is never bulk-selected
 - [ ] Assignment ceiling enforced at the API: PM may assign site managers/PMs in the project plus HO/Admin; site manager may assign site managers/PM and never HO/Admin
 - [ ] Picker shows only scope-associated people, so ceiling-eligible HO/Admin accounts are not offered in a project scope
 - [ ] PM/site manager cannot (re)assign a Head Office task; Admin/HO can

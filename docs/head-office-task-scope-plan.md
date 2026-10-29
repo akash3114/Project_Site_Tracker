@@ -186,13 +186,14 @@ Replace the single-select `mgmt-scope` popover with a multi-select picker.
 
 - Trigger label: `Where`; selected scopes render as chips plus `+N`.
 - Search matches project, acronym, company, plaza, department, office.
-- Groups: `Head Office` (all departments + each department) first, then
-  companies/projects. Each project row is the **project-level** task; plazas are
-  child rows.
+- Groups: `Head Office level` (the HO-level row) and `Departments` (one row per
+  department) first, then companies/projects. Each project row is the
+  **project-level** task; plazas are child rows.
 - Checkboxes; Space toggles; Enter applies (never submits the form); Escape
   closes and returns focus.
 - Footer shortcuts: `Select all projects` (project-level only),
-  `Select all departments`, `Clear`.
+  `Select all HO departments` (departments only — never the Head Office level
+  row), `Clear`.
 - Live summary: `Creates 4 tasks · 3 projects · 1 department`.
 - Submit label: `Add task` or `Add N tasks`; cap at 50.
 - **Remove Recent entirely:** delete `RECENT_KEY`, `RECENT_LIMIT`,
