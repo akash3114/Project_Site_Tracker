@@ -29,6 +29,8 @@ export type AssigneePickerProps = {
  * Grouping, role labels and search text all come from `lib/assignee-groups`, so
  * the composer and the task drawer present the same people in the same order.
  * The viewer is pinned to the top when they are eligible for the scope.
+ * Each row leads with the designation and context (`Role | Context`) and shows
+ * the person's name as the quieter second line; the trigger mirrors that order.
  */
 export function AssigneePicker({
   candidates,
@@ -60,8 +62,8 @@ export function AssigneePicker({
     if (viewer) {
       rows.push({
         value: viewer.id,
-        label: viewer.name,
-        detail: candidateSubtitle(viewer),
+        label: candidateSubtitle(viewer),
+        detail: viewer.name,
         keywords: viewer.search ?? "",
         group: "Assign to me",
       });
@@ -75,8 +77,8 @@ export function AssigneePicker({
       for (const row of group.rows) {
         rows.push({
           value: row.id,
-          label: row.name,
-          detail: candidateSubtitle(row),
+          label: candidateSubtitle(row),
+          detail: row.name,
           keywords: row.search ?? "",
           group: group.label,
         });

@@ -3435,8 +3435,8 @@
 
 .picker-option-detail {
   overflow: hidden;
-  color: var(--c-quiet);
-  font-size: 10px;
+  color: #5d6d64;
+  font-size: 10.5px;
   font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
