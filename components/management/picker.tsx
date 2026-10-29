@@ -18,10 +18,11 @@ import {
  */
 export type PickerOption = {
   value: string;
+  /** Primary line, e.g. a designation ("Toll Manager | AP Plaza"). */
   label: string;
   /** Quiet right-aligned text, e.g. a count. */
   meta?: string;
-  /** Second line for rich rows, e.g. "Toll Manager | AP Plaza". */
+  /** Secondary line for rich rows, e.g. a person's name. */
   detail?: string;
   /** Extra searchable text that is not displayed. */
   keywords?: string;
@@ -47,6 +48,10 @@ export type PickerProps = {
   maxSelected?: number;
   width?: "default" | "wide";
   renderTrigger?: (selected: PickerOption[]) => ReactNode;
+  /**
+   * Bulk actions rendered as a top action bar: directly under the search and
+   * above the empty state / list, so they stay visible without scrolling.
+   */
   footer?: ReactNode;
   className?: string;
   onOpenChange?: (open: boolean) => void;
@@ -380,6 +385,8 @@ export function Picker({
             onKeyDown={onSearchKeyDown}
           />
 
+          {footer ? <div className="picker-footer">{footer}</div> : null}
+
           {filtered.length === 0 ? (
             <p className="picker-empty">{emptyText}</p>
           ) : (
@@ -448,8 +455,6 @@ export function Picker({
               ))}
             </div>
           )}
-
-          {footer ? <div className="picker-footer">{footer}</div> : null}
         </div>
       ) : null}
     </div>
