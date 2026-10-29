@@ -67,6 +67,23 @@ function toScopeInput(key: string): Record<string, string> {
 }
 
 /**
+ * Query string for `/api/assignees`, derived from an assignee cache key so the
+ * params and the cache entry can never disagree. The key is the single source
+ * of truth for "which scope is this list for".
+ */
+function assigneeQuery(key: string): string {
+  if (key === "head-office") return "headOffice=true";
+  const [kind, id, projectId] = key.split(":");
+  if (kind === "department") {
+    return new URLSearchParams({ departmentId: id }).toString();
+  }
+  if (kind === "project") {
+    return new URLSearchParams({ projectId: id }).toString();
+  }
+  return new URLSearchParams({ projectId, plazaId: id }).toString();
+}
+
+/**
  * The management command bar. One or more scopes are chosen first, then a
  * single submit creates one task per scope. A successful create keeps every
  * field except the title and description so repeat filing is fast.
@@ -188,20 +205,23 @@ export function CommandComposer({
     [selectedScopes],
   );
 
-  const plazaProjectId = useMemo(() => {
-    if (singleRef?.kind !== "plaza") return null;
-    return (
-      plazas.find((plaza) => plaza.id === singleRef.id)?.project?.id ?? null
-    );
-  }, [plazas, singleRef]);
-
+  /**
+   * Cache key for the assignee list of the single selected scope.
+   *
+   * It encodes everything the query depends on — kind, id and, for a plaza, its
+   * parent project — so a cached list can only be reused for the exact same
+   * scope. `null` means "not exactly one scope" or "plaza without a project";
+   * both leave the picker empty and disabled.
+   */
   const assigneeKey = useMemo(() => {
     if (!singleRef) return null;
     if (singleRef.kind === "head-office") return "head-office";
     if (singleRef.kind === "department") return `department:${singleRef.id}`;
     if (singleRef.kind === "project") return `project:${singleRef.id}`;
-    return plazaProjectId ? `plaza:${singleRef.id}` : null;
-  }, [singleRef, plazaProjectId]);
+    const projectId = plazas.find((plaza) => plaza.id === singleRef.id)?.project
+      ?.id;
+    return projectId ? `plaza:${singleRef.id}:${projectId}` : null;
+  }, [plazas, singleRef]);
 
   const assigneeScopeKind: "project" | "department" | null = useMemo(() => {
     if (!singleRef) return null;
@@ -211,12 +231,14 @@ export function CommandComposer({
   }, [singleRef]);
 
   // People are scope-specific, so the assignee is only offered when exactly one
-  // scope is selected. A different scope invalidates the previous choice.
+  // scope is selected. Any change of scope — add, remove or replace — drops the
+  // chosen person and the previous scope's list before the new one loads, and a
+  // late response from an abandoned request is ignored via `cancelled`.
   useEffect(() => {
     setAssigneeId(null);
+    setAssignees([]);
 
-    if (!assigneeKey || !singleRef) {
-      setAssignees([]);
+    if (!assigneeKey) {
       setAssigneesLoading(false);
       return;
     }
@@ -228,31 +250,12 @@ export function CommandComposer({
       return;
     }
 
-    const params = new URLSearchParams();
-    if (singleRef.kind === "head-office") {
-      params.set("headOffice", "true");
-    } else if (singleRef.kind === "department") {
-      params.set("departmentId", singleRef.id);
-    } else if (singleRef.kind === "project") {
-      params.set("projectId", singleRef.id);
-    } else if (singleRef.kind === "plaza") {
-      if (!plazaProjectId) {
-        setAssignees([]);
-        setAssigneesLoading(false);
-        return;
-      }
-      params.set("projectId", plazaProjectId);
-      params.set("plazaId", singleRef.id);
-    }
-
-    // Never offer the previous scope's people against the new one.
-    setAssignees([]);
     setAssigneesLoading(true);
     let cancelled = false;
     void (async () => {
       try {
         const data = await fetchJson<AssigneeCandidate[]>(
-          `/api/assignees?${params.toString()}`,
+          `/api/assignees?${assigneeQuery(assigneeKey)}`,
         );
         const rows = Array.isArray(data) ? data : [];
         ownerCache.current.set(assigneeKey, rows);
@@ -267,7 +270,7 @@ export function CommandComposer({
     return () => {
       cancelled = true;
     };
-  }, [assigneeKey, plazaProjectId, singleRef]);
+  }, [assigneeKey]);
 
   function onPriorityKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     const index = PRIORITIES.indexOf(priority);
@@ -501,9 +504,17 @@ export function CommandComposer({
           />
         </div>
 
-        {scopeCount > 1 ? (
+        {scopeCount === 0 ? (
+          <span className="mgmt-composer-note">
+            Pick a scope to choose an assignee
+          </span>
+        ) : scopeCount > 1 ? (
           <span className="mgmt-composer-note">
             Pick one scope to assign now
+          </span>
+        ) : !assigneesLoading && assignees.length === 0 ? (
+          <span className="mgmt-composer-note">
+            No one is associated with this scope yet
           </span>
         ) : null}
 
