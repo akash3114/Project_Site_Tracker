@@ -209,7 +209,7 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
                   {key === "tasks"
                     ? "Tasks"
                     : key === "portfolio"
-                      ? "Portfolio"
+                      ? "Projects"
                       : "Insights"}
                 </button>
               ))}

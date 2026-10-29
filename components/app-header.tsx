@@ -23,7 +23,7 @@ export function AppHeader({
         { label: "My tasks", href: "/my-tasks" },
       ]
     : [
-        { label: "Portfolio", href: "/management" },
+        { label: "Home", href: "/management" },
         { label: "Projects", href: "/projects" },
         { label: "My tasks", href: "/my-tasks" },
         { label: "Administration", href: "/admin" },
