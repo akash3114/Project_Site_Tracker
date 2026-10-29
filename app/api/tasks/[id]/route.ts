@@ -36,7 +36,7 @@ export async function GET(
 
     const [assignees, pendingReopen] = await Promise.all([
       permissions.canAssign
-        ? assigneeCandidates(access.role, scope)
+        ? assigneeCandidates(access.role, scope, user.id)
         : Promise.resolve([]),
       db.taskReopenRequest.findFirst({
         where: { taskId: task.id, status: "PENDING" },

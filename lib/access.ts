@@ -798,49 +798,64 @@ function toCandidate(
 }
 
 /**
- * Eligible assignees for the picker, already filtered by the assignment
- * ceiling. One query: the `where` clause is the ceiling.
+ * Eligible assignees for the picker: active people associated with the selected
+ * scope. One query: the `where` clause is the association filter.
+ *
+ * A candidate is associated with the scope when they hold:
+ * - a Head Office membership in the scope's department (any membership at Head
+ *   Office level, where `departmentId` is null);
+ * - a project assignment on the scope's project; or
+ * - a plaza assignment on the scope's plaza (or, at project level, on any of
+ *   the project's plazas).
+ *
+ * Only active users qualify. The caller (`viewerId`) is always included even
+ * when unassociated, so "Assign to me" keeps working; that is the only
+ * exception. A site-manager actor still never sees admin or Head Office
+ * accounts, the viewer included, because they may not assign them.
  */
 export async function assigneeCandidates(
   actorRole: ScopeRole,
   scope: TaskScope,
+  viewerId?: string | null,
 ): Promise<AssigneeCandidate[]> {
   const privileged = actorRole === "ADMIN" || actorRole === "HEAD_OFFICE";
   if (scope.kind === "department" && !privileged) return [];
 
-  let where: Prisma.UserWhereInput;
-  if (scope.kind === "department" || privileged) {
-    where = { active: true };
+  const associations: Prisma.UserWhereInput[] = [];
+  if (scope.kind === "department") {
+    associations.push({
+      headOfficeMemberships: {
+        some:
+          scope.departmentId === null
+            ? {}
+            : { departmentId: scope.departmentId },
+      },
+    });
   } else {
     const { projectId, plazaId } = scope;
-    const onScope: Prisma.UserWhereInput[] = [
-      { projectAssignments: { some: { projectId } } },
-      {
-        plazaAssignments: {
-          some: plazaId !== null ? { plazaId } : { plaza: { projectId } },
-        },
+    associations.push({ projectAssignments: { some: { projectId } } });
+    associations.push({
+      plazaAssignments: {
+        some: plazaId !== null ? { plazaId } : { plaza: { projectId } },
       },
-    ];
-
-    if (actorRole === "PROJECT_MANAGER") {
-      where = {
-        active: true,
-        OR: [
-          ...onScope,
-          { headOfficeMemberships: { some: {} } },
-          { isAdmin: true },
-        ],
-      };
-    } else {
-      // Site managers may never assign Head Office or admin accounts.
-      where = {
-        active: true,
-        isAdmin: false,
-        headOfficeMemberships: { none: {} },
-        OR: onScope,
-      };
-    }
+    });
   }
+
+  const candidates: Prisma.UserWhereInput[] = viewerId
+    ? [...associations, { id: viewerId }]
+    : associations;
+
+  // Site managers may never assign Head Office or admin accounts. The viewer
+  // is a site manager themselves, so the exclusions hold for them too.
+  const where: Prisma.UserWhereInput =
+    actorRole === "SITE_MANAGER"
+      ? {
+          active: true,
+          isAdmin: false,
+          headOfficeMemberships: { none: {} },
+          OR: candidates,
+        }
+      : { active: true, OR: candidates };
 
   const users = await db.user.findMany({
     where,

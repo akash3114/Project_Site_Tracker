@@ -78,7 +78,7 @@ export async function GET(req: Request): Promise<Response> {
       }
     }
 
-    const items = await assigneeCandidates(role, scope);
+    const items = await assigneeCandidates(role, scope, user.id);
     return NextResponse.json(items);
   } catch (e) {
     if (e instanceof Response) return e;
