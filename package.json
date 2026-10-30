@@ -6,44 +6,50 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "reset-admin": "tsx scripts/reset-admin.ts",
     "rotate-managers": "tsx scripts/rotate-manager-passwords.ts",
     "seed": "tsx prisma/seed.ts"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
-    "@prisma/client": "^6.19.3",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@radix-ui/react-slot": "^1.1.0",
     "@tanstack/react-table": "^8.20.5",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.453.0",
-    "next": "14.2.35",
+    "next": "^16.4.3",
     "next-auth": "^5.0.0-beta.32",
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "^19",
+    "react-dom": "^19",
     "react-hook-form": "^7.53.0",
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "eslint": "^8",
-    "eslint-config-next": "14.2.35",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^18.0.9",
+    "eslint": "^10",
+    "eslint-config-next": "^16.4.3",
     "postcss": "^8",
     "prettier": "^3.3.3",
-    "prisma": "^6.19.3",
+    "prisma": "^7.10.1",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.15",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "@prisma/client@7.10.1": true,
+    "@prisma/engines@7.10.1": true,
+    "esbuild@0.28.2": true,
+    "prisma@7.10.1": true,
+    "unrs-resolver@1.12.2": true
   }
 }
