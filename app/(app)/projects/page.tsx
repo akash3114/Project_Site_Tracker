@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { PageHeader } from "@/components/page-header";
 import { ProjectCard } from "@/components/project-card";
 
 type ProjectItem = {
@@ -75,21 +74,9 @@ export default function ProjectsPage() {
   }, []);
 
   const groups = groupByCompany(projects ?? []);
-  const archivedCount = (projects ?? []).filter((p) => !p.active).length;
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
-      <PageHeader
-        overline="Company projects"
-        title="Projects"
-        subtitle={
-          projects === null && !error
-            ? "Loading…"
-            : `${projects?.length ?? 0} projects · ${groups.length} ${
-                groups.length === 1 ? "company" : "companies"
-              }${archivedCount ? ` · ${archivedCount} archived` : ""} · select one for plaza health`
-        }
-      />
       {projects === null && !error ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((i) => (
