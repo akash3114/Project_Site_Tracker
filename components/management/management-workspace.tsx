@@ -50,6 +50,26 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
 
+  // The topbar is sticky, so the rail must stick below its measured height.
+  // The composer grows (scope chips, description), so measure instead of
+  // hard-coding the offset in CSS.
+  const topbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const topbar = topbarRef.current;
+    const main = topbar?.parentElement;
+    if (!topbar || !main) return;
+    const update = () => {
+      main.style.setProperty("--mgmt-topbar-h", `${topbar.offsetHeight}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(topbar);
+    return () => {
+      observer.disconnect();
+      main.style.removeProperty("--mgmt-topbar-h");
+    };
+  }, []);
+
   // N focuses the composer, / focuses search. Ignore while typing.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -169,7 +189,7 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
 
   return (
     <main className="cockpit-main mgmt-main">
-      <div className="mgmt-topbar">
+      <div className="mgmt-topbar" ref={topbarRef}>
         <div className="mgmt-topbar-composer">
           <CommandComposer
             projects={projects}
