@@ -39,7 +39,7 @@ export interface SpotlightTask {
     projectName: string;
   } | null;
   category?: { id: string; name: string } | null;
-  assignee: { name: string } | null;
+  assignees: Array<{ id?: string; name: string }>;
 }
 
 export interface DepartmentSummary {

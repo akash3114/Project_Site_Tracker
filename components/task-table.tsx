@@ -1,5 +1,6 @@
 "use client";
 
+import { assigneeSummary } from "@/lib/assignee-summary";
 import { fmtDate, isOverdue } from "@/lib/format";
 import { StatusBadge } from "./status-badge";
 
@@ -29,7 +30,7 @@ export type PlazaTaskItem = {
     project?: { id: string; name: string } | null;
   } | null;
   category?: { id: string; name: string } | null;
-  assignee?: { id: string; name: string } | null;
+  assignees?: Array<{ id: string; name: string }>;
   createdBy?: { id: string; name: string } | null;
   completedBy?: { id: string; name: string } | null;
 };
@@ -160,7 +161,7 @@ export function TaskTable({
                     </span>
                   </td>
                   <td className="p-4 align-top text-[#1C2824]">
-                    {task.assignee?.name ?? "—"}
+                    {assigneeSummary(task.assignees, "—")}
                   </td>
                   <td className="p-4 align-top">
                     <PriorityBadge priority={task.priority} />
@@ -201,7 +202,7 @@ export function TaskTable({
               </span>
               <TaskContextLine task={task} />
               <span className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-[#586760]">
-                <span>{task.assignee?.name ?? "Unassigned"}</span>
+                <span>{assigneeSummary(task.assignees)}</span>
                 <span
                   className={overdue ? "font-medium text-[#8F2824]" : undefined}
                 >

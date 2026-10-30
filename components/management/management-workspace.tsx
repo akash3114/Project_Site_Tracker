@@ -174,7 +174,9 @@ export function ManagementWorkspace({ userId }: { userId: string }) {
   const assignees = useMemo(() => {
     const seen = new Map<string, string>();
     for (const task of tasks) {
-      if (task.assignee?.id) seen.set(task.assignee.id, task.assignee.name);
+      for (const person of task.assignees) {
+        seen.set(person.id, person.name);
+      }
     }
     return Array.from(seen, ([id, name]) => ({ id, name }));
   }, [tasks]);

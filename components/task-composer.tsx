@@ -28,7 +28,7 @@ type OwnerSource = {
   plaza?: { id: string } | null;
   projectId?: string | null;
   project?: { id: string } | null;
-  assignee?: { id: string; name: string } | null;
+  assignees?: Array<{ id: string; name: string }> | null;
 };
 
 const EMPTY_TASKS: OwnerSource[] = [];
@@ -73,12 +73,14 @@ function parseScope(
 function deriveAssignees(scope: Scope, tasks: OwnerSource[]): AssigneeCandidate[] {
   const seen = new Map<string, string>();
   for (const task of tasks) {
-    if (!task.assignee?.id || !task.assignee.name) continue;
     const matches =
       scope.kind === "plaza"
         ? task.plaza?.id === scope.plazaId
         : (task.projectId ?? task.project?.id) === scope.projectId;
-    if (matches) seen.set(task.assignee.id, task.assignee.name);
+    if (!matches) continue;
+    for (const person of task.assignees ?? []) {
+      if (person.id && person.name) seen.set(person.id, person.name);
+    }
   }
   return Array.from(seen, ([id, name]) => ({ id, name }));
 }
@@ -146,7 +148,7 @@ export function TaskComposer({
   const [priority, setPriority] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeCandidate[]>([]);
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [fetchedCategories, setFetchedCategories] =
@@ -317,7 +319,7 @@ export function TaskComposer({
     body.priority = priority || "MEDIUM";
     if (categoryId) body.categoryId = categoryId;
     if (dueDate) body.dueDate = dueDate;
-    if (assigneeId) body.assigneeId = assigneeId;
+    if (assigneeIds.length > 0) body.assigneeIds = assigneeIds;
     try {
       const res = await fetch("/api/tasks", {
         method: "POST",
@@ -340,7 +342,7 @@ export function TaskComposer({
       setPriority("");
       setCategoryId("");
       setDueDate("");
-      setAssigneeId("");
+      setAssigneeIds([]);
       setAlert({ tone: "ok", text: `Added “${cleanTitle}”.` });
       onCreated();
     } catch {
@@ -366,7 +368,7 @@ export function TaskComposer({
             disabled={plazaOptions.length === 0}
             onChange={(event) => {
               setScopeValue(event.target.value);
-              setAssigneeId("");
+              setAssigneeIds([]);
             }}
           >
             <option value="">Project or plaza</option>
@@ -438,8 +440,9 @@ export function TaskComposer({
           compact
           className="cockpit-composer-assignee"
           candidates={assigneeOptions}
-          value={assigneeId || null}
-          onChange={(id) => setAssigneeId(id ?? "")}
+          multiple
+          values={assigneeIds}
+          onValuesChange={setAssigneeIds}
           disabled={!scope}
           scopeKind={pickerScopeKind}
           viewerId={viewerId}

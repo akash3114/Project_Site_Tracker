@@ -56,7 +56,8 @@ export type MgmtTask = {
     sortOrder?: number | null;
   } | null;
   category?: { id: string; name: string } | null;
-  assignee?: { id: string; name: string } | null;
+  /** Everyone on the task, ordered by assignment time; empty = unassigned. */
+  assignees: Array<{ id: string; name: string }>;
   createdBy?: { id: string; name: string } | null;
   completedBy?: { id: string; name: string } | null;
 };
@@ -311,7 +312,7 @@ function haystack(task: MgmtTask): string {
     // Location words: the scope picker's own vocabulary.
     ...(isHeadOfficeTask(task) ? ["head office"] : []),
     task.category?.name ?? "",
-    task.assignee?.name ?? "",
+    ...task.assignees.map((person) => person.name),
     statusOf(task),
     priorityOf(task),
   ]
@@ -338,7 +339,10 @@ export function scopeTasks(
       const fields = scopeFieldsOf(task);
       if (!refs.some((ref) => taskMatchesScope(fields, ref))) return false;
     }
-    if (filters.assigneeId && task.assignee?.id !== filters.assigneeId) {
+    if (
+      filters.assigneeId &&
+      !task.assignees.some((person) => person.id === filters.assigneeId)
+    ) {
       return false;
     }
     if (q && !haystack(task).includes(q)) return false;
@@ -412,8 +416,13 @@ export function filterTasks(
     ) {
       return false;
     }
-    if (filters.mine && task.assignee?.id !== userId) return false;
-    if (filters.unassigned && task.assignee) return false;
+    if (
+      filters.mine &&
+      !task.assignees.some((person) => person.id === userId)
+    ) {
+      return false;
+    }
+    if (filters.unassigned && task.assignees.length > 0) return false;
     if (filters.overdue && !isOverdue(task.dueDate, task.status)) return false;
     if (filters.dueWeek) {
       const bucket = dueBucket(task);
@@ -683,8 +692,10 @@ export function countFacets(
     low: open.filter((task) => priorityOf(task) === "LOW").length,
     overdue: open.filter((task) => isOverdue(task.dueDate, task.status)).length,
     blocked: open.filter((task) => statusOf(task) === "BLOCKED").length,
-    unassigned: open.filter((task) => !task.assignee).length,
-    mine: open.filter((task) => task.assignee?.id === userId).length,
+    unassigned: open.filter((task) => task.assignees.length === 0).length,
+    mine: open.filter((task) =>
+      task.assignees.some((person) => person.id === userId),
+    ).length,
     headOffice: open.filter(isHeadOfficeTask).length,
     dueWeek: open.filter((task) => {
       const bucket = dueBucket(task);

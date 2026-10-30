@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { assigneeSummary } from "@/lib/assignee-summary";
 import { fmtDate, isOverdue } from "@/lib/format";
 import { ProgressBar } from "@/components/progress-bar";
 import { StatusBadge } from "@/components/status-badge";
@@ -47,7 +48,7 @@ type ProjectTask = {
   priority: string;
   dueDate?: string | null;
   category?: { id: string; name: string } | null;
-  assignee?: { id: string; name: string } | null;
+  assignees?: Array<{ id: string; name: string }>;
   plaza?: { id: string; name: string } | null;
 };
 
@@ -160,9 +161,11 @@ export default function ProjectPage() {
   {
     const seen = new Set<string>();
     for (const task of projectTasks ?? []) {
-      if (task.assignee && !seen.has(task.assignee.id)) {
-        seen.add(task.assignee.id);
-        drawerAssignees.push(task.assignee);
+      for (const person of task.assignees ?? []) {
+        if (!seen.has(person.id)) {
+          seen.add(person.id);
+          drawerAssignees.push({ id: person.id, name: person.name });
+        }
       }
     }
   }
@@ -359,7 +362,7 @@ export default function ProjectPage() {
                             </span>
                           </span>
                           <span className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-[#586760]">
-                            <span>{task.assignee?.name ?? "Unassigned"}</span>
+                            <span>{assigneeSummary(task.assignees)}</span>
                             <span className={overdue ? "font-medium text-[#8F2824]" : undefined}>
                               Due {fmtDate(task.dueDate)}
                               {overdue ? " · overdue" : ""}

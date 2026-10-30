@@ -6,6 +6,7 @@ import { TaskDrawer } from "@/components/task-drawer";
 import { TaskComposer } from "@/components/task-composer";
 import { PageHeader } from "@/components/page-header";
 import type { PlazaTaskItem } from "@/components/task-table";
+import { assigneeSummary } from "@/lib/assignee-summary";
 import type { ProjectSummary } from "@/lib/dashboard";
 import { fmtDate, isOverdue } from "@/lib/format";
 
@@ -460,7 +461,7 @@ function ManagerWorkbench() {
     return tasks
       .filter((task) => task.status !== "COMPLETED")
       .filter((task) => filter === "overdue" ? isOverdue(task.dueDate, task.status) : filter === "blocked" ? task.status === "BLOCKED" : true)
-      .filter((task) => !q || `${task.title} ${task.plaza?.name ?? ""} ${task.project?.name ?? task.plaza?.project?.name ?? ""} ${task.project?.company?.name ?? ""} ${task.assignee?.name ?? ""}`.toLowerCase().includes(q))
+      .filter((task) => !q || `${task.title} ${task.plaza?.name ?? ""} ${task.project?.name ?? task.plaza?.project?.name ?? ""} ${task.project?.company?.name ?? ""} ${(task.assignees ?? []).map((person) => person.name).join(" ")}`.toLowerCase().includes(q))
       .sort((a, b) => {
         const lateDelta = Number(isOverdue(b.dueDate, b.status)) - Number(isOverdue(a.dueDate, a.status));
         if (lateDelta) return lateDelta;
@@ -472,7 +473,11 @@ function ManagerWorkbench() {
 
   const assignees = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const task of tasks) if (task.assignee?.id) seen.set(task.assignee.id, task.assignee.name);
+    for (const task of tasks) {
+      for (const person of task.assignees ?? []) {
+        if (person.id) seen.set(person.id, person.name);
+      }
+    }
     return Array.from(seen, ([id, name]) => ({ id, name }));
   }, [tasks]);
 
@@ -519,7 +524,7 @@ function ManagerWorkbench() {
                         <button type="button" onClick={() => setSelectedTask(task.id)}>{task.title}</button>
                         <small>{task.plaza?.name ?? "Project-level"} · {formatTaskProject(task)}</small>
                       </span>
-                      <span role="cell">{task.assignee?.name ?? "Unassigned"}</span>
+                      <span role="cell">{assigneeSummary(task.assignees)}</span>
                       <span role="cell"><StatusPill status={task.status} /></span>
                       <span role="cell" className={overdue ? "task-late" : "task-due"}>{fmtDate(task.dueDate)}{overdue ? " · late" : ""}</span>
                     </div>

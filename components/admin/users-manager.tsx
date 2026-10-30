@@ -25,6 +25,8 @@ type UserItem = {
   departmentName: string | null;
   departmentCode: string | null;
   officeName: string | null;
+  managerId: string | null;
+  managerName: string | null;
 };
 
 type DepartmentOption = {
@@ -67,6 +69,7 @@ export function UsersManager() {
     password: "",
     title: "",
     isAdmin: false,
+    managerId: "",
   });
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState("");
@@ -118,7 +121,7 @@ export function UsersManager() {
     [items, departmentFilter],
   );
 
-  async function patch(id: string, body: Record<string, unknown>) {
+  async function patch(id: string, body: Record<string, unknown>): Promise<boolean> {
     setSaving(true);
     setFormError(null);
     setNotice(null);
@@ -130,8 +133,10 @@ export function UsersManager() {
       });
       if (!res.ok) throw new Error(await readError(res));
       await load();
+      return true;
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "Update failed");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -143,10 +148,15 @@ export function UsersManager() {
     setFormError(null);
     setNotice(null);
     try {
+      const { managerId, ...rest } = form;
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, title: form.title.trim() }),
+        body: JSON.stringify({
+          ...rest,
+          title: form.title.trim(),
+          ...(managerId ? { managerId } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await readError(res));
       setForm({
@@ -155,6 +165,7 @@ export function UsersManager() {
         password: "",
         title: "",
         isAdmin: false,
+        managerId: "",
       });
       setShowCreate(false);
       setNotice("User created");
@@ -182,6 +193,25 @@ export function UsersManager() {
     setTitleFor(null);
     setTitleDraft("");
     setNotice("Job title updated");
+  }
+
+  async function saveManager(id: string, managerId: string) {
+    const ok = await patch(id, { managerId: managerId || null });
+    if (ok) setNotice("Reporting line updated");
+  }
+
+  /** Active users that can manage `user` (self excluded, current manager kept). */
+  function managerChoices(user: UserItem | null): { id: string; name: string }[] {
+    const options = items
+      .filter((u) => u.active && u.id !== user?.id)
+      .map((u) => ({ id: u.id, name: u.name }));
+    if (user?.managerId && !options.some((o) => o.id === user.managerId)) {
+      options.unshift({
+        id: user.managerId,
+        name: user.managerName ?? "Current manager",
+      });
+    }
+    return options;
   }
 
   return (
@@ -269,6 +299,21 @@ export function UsersManager() {
               <option value="ADMIN">Admin</option>
             </select>
           </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-[#1C2824]">
+            Reports to
+            <select
+              className={inputCls}
+              value={form.managerId}
+              onChange={(e) => setForm({ ...form, managerId: e.target.value })}
+            >
+              <option value="">No manager</option>
+              {managerChoices(null).map((manager) => (
+                <option key={manager.id} value={manager.id}>
+                  {manager.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <p className="text-xs text-[#586760] md:col-span-2">
             New users start with no scopes. Department, project and plaza
             assignments are set on the Access page.
@@ -330,7 +375,7 @@ export function UsersManager() {
           </div>
 
           <div className="overflow-x-auto rounded-[12px] border border-[#CDD6CE] bg-white">
-            <table className="w-full min-w-[1140px] border-collapse">
+            <table className="w-full min-w-[1280px] border-collapse">
               <thead>
                 <tr className="border-b border-[#CDD6CE] bg-[#FAFBFC]">
                   <th className={thCls}>Name / Job title</th>
@@ -338,6 +383,7 @@ export function UsersManager() {
                   <th className={thCls}>Account type</th>
                   <th className={thCls}>Department</th>
                   <th className={thCls}>Office</th>
+                  <th className={thCls}>Reports to</th>
                   <th className={thCls}>Active</th>
                   <th className={thCls}>Plazas</th>
                   <th className={thCls}>Actions</th>
@@ -347,7 +393,7 @@ export function UsersManager() {
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className={`${tdCls} text-[#586760]`}
                     >
                       No users match the department filter.
@@ -415,6 +461,29 @@ export function UsersManager() {
                     </td>
                     <td className={`${tdCls} text-[#586760]`}>
                       {u.officeName ?? "—"}
+                    </td>
+                    <td className={tdCls}>
+                      <span className="flex flex-col gap-1">
+                        <span className="text-sm text-[#1C2824]">
+                          {u.managerName ?? "—"}
+                        </span>
+                        <select
+                          aria-label={`Reports to for ${u.email}`}
+                          className="min-h-[44px] rounded-[8px] border border-[rgba(23,34,44,0.12)] bg-white px-2 text-sm text-[#1C2824]"
+                          value={u.managerId ?? ""}
+                          disabled={saving}
+                          onChange={(e) =>
+                            void saveManager(u.id, e.target.value)
+                          }
+                        >
+                          <option value="">—</option>
+                          {managerChoices(u).map((manager) => (
+                            <option key={manager.id} value={manager.id}>
+                              {manager.name}
+                            </option>
+                          ))}
+                        </select>
+                      </span>
                     </td>
                     <td className={tdCls}>{u.active ? "Yes" : "No"}</td>
                     <td className={tdCls}>{u.plazaIds.length}</td>

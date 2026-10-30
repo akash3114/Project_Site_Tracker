@@ -58,7 +58,7 @@ type TaskDetail = {
     lengthKm?: number | null;
   } | null;
   category?: { id: string; name: string } | null;
-  assignee?: Person | null;
+  assignees?: Person[];
   createdBy?: Person | null;
   completedBy?: Person | null;
   attachments?: AttachmentItem[];
@@ -230,7 +230,7 @@ export function TaskDrawer({
             task?: TaskDetail;
             events?: FeedEvent[];
             permissions?: TaskPermissions;
-            assignees?: AssigneeCandidate[];
+            assigneeCandidates?: AssigneeCandidate[];
             reopenRequest?: ReopenRequest | null;
           }
         | null;
@@ -242,7 +242,9 @@ export function TaskDrawer({
       setTask(data.task);
       setEvents(Array.isArray(data.events) ? data.events : []);
       setPermissions(data.permissions ?? null);
-      setApiAssignees(Array.isArray(data.assignees) ? data.assignees : []);
+      setApiAssignees(
+        Array.isArray(data.assigneeCandidates) ? data.assigneeCandidates : [],
+      );
       setPendingReopen(data.reopenRequest ?? null);
     } catch {
       if (seq === loadSeq.current) {
@@ -359,11 +361,13 @@ export function TaskDrawer({
         ? apiAssignees
         : assignees.map((row) => ({ id: row.id, name: row.name }));
     const rows = [...base];
-    if (task?.assignee && !rows.some((row) => row.id === task.assignee?.id)) {
-      rows.unshift({ id: task.assignee.id, name: task.assignee.name });
+    for (const person of task?.assignees ?? []) {
+      if (!rows.some((row) => row.id === person.id)) {
+        rows.unshift({ id: person.id, name: person.name });
+      }
     }
     return rows;
-  }, [apiAssignees, assignees, task?.assignee]);
+  }, [apiAssignees, assignees, task?.assignees]);
 
   const lastResolvedReopen = useMemo(() => {
     return (
@@ -453,13 +457,17 @@ export function TaskDrawer({
     );
   }
 
-  function changeAssignee(value: string) {
+  function changeAssignees(next: string[]) {
     if (!task) return;
     void run(
       "assign",
       `/api/tasks/${task.id}/assign`,
-      jsonRequest("POST", { assigneeId: value || null }),
-      value ? "Assignee updated" : "Task unassigned",
+      jsonRequest("POST", { assigneeIds: next }),
+      next.length === 0
+        ? "Task unassigned"
+        : next.length === 1
+          ? "Assignee updated"
+          : `Assignees updated (${next.length})`,
     );
   }
 
@@ -666,9 +674,13 @@ export function TaskDrawer({
                     </dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className={LABEL}>Assignee</dt>
+                    <dt className={LABEL}>Assignees</dt>
                     <dd className="truncate">
-                      {task.assignee?.name ?? "Unassigned"}
+                      {(task.assignees ?? []).length > 0
+                        ? task.assignees
+                            ?.map((person) => person.name)
+                            .join(", ")
+                        : "Unassigned"}
                     </dd>
                   </div>
                   <div className="min-w-0">
@@ -737,12 +749,13 @@ export function TaskDrawer({
 
               <section aria-label="Assignment" className="flex flex-col gap-2">
                 <h3 className="font-display text-sm font-semibold text-[#1C2824]">
-                  Assignee
+                  Assignees
                 </h3>
                 <AssigneePicker
                   candidates={assigneeOptions}
-                  value={task.assignee?.id ?? null}
-                  onChange={(id) => changeAssignee(id ?? "")}
+                  multiple
+                  values={(task.assignees ?? []).map((person) => person.id)}
+                  onValuesChange={changeAssignees}
                   disabled={!permissions?.canAssign || busy !== null}
                   scopeKind={headOffice ? "department" : "project"}
                   viewerId={me?.id ?? null}

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { assigneeSummary } from "@/lib/assignee-summary";
 import { fmtDate, isOverdue } from "@/lib/format";
 import { ProgressBar } from "@/components/progress-bar";
 import { StatusBadge } from "@/components/status-badge";
@@ -210,7 +211,9 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
     if (resolvedAssignees) return resolvedAssignees;
     const seen = new Map<string, string>();
     for (const t of tasks) {
-      if (t.assignee?.id && t.assignee?.name) seen.set(t.assignee.id, t.assignee.name);
+      for (const person of t.assignees ?? []) {
+        if (person.id && person.name) seen.set(person.id, person.name);
+      }
     }
     return Array.from(seen, ([id, name]) => ({ id, name }));
   }, [resolvedAssignees, tasks]);
@@ -447,7 +450,7 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
                           <span
                             className={`font-mono text-xs ${isOverdue(task.dueDate, task.status) ? "font-medium text-[#8F2824]" : "text-[#586760]"}`}
                           >
-                            {task.assignee?.name ?? "Unassigned"} · Due{" "}
+                            {assigneeSummary(task.assignees)} · Due{" "}
                             {fmtDate(task.dueDate)}
                           </span>
                           <label className="flex items-center gap-2 font-mono text-xs text-[#586760]">

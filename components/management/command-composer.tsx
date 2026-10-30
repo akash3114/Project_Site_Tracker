@@ -114,7 +114,7 @@ export function CommandComposer({
   const [priority, setPriority] = useState<MgmtPriority>("MEDIUM");
   const [dueDate, setDueDate] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [assignees, setAssignees] = useState<AssigneeCandidate[]>([]);
   const [assigneesLoading, setAssigneesLoading] = useState(false);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -235,7 +235,7 @@ export function CommandComposer({
   // chosen person and the previous scope's list before the new one loads, and a
   // late response from an abandoned request is ignored via `cancelled`.
   useEffect(() => {
-    setAssigneeId(null);
+    setAssigneeIds([]);
     setAssignees([]);
 
     if (!assigneeKey) {
@@ -365,7 +365,7 @@ export function CommandComposer({
 
     if (cleanDescription) body.description = cleanDescription;
     if (dueDate) body.dueDate = dueDate;
-    if (assigneeId) body.assigneeId = assigneeId;
+    if (assigneeIds.length > 0) body.assigneeIds = assigneeIds;
     if (categoryId) body.categoryId = categoryId;
 
     try {
@@ -494,8 +494,9 @@ export function CommandComposer({
           <span>Assignee</span>
           <AssigneePicker
             candidates={assignees}
-            value={assigneeId}
-            onChange={setAssigneeId}
+            multiple
+            values={assigneeIds}
+            onValuesChange={setAssigneeIds}
             loading={assigneesLoading}
             disabled={scopeCount !== 1}
             scopeKind={assigneeScopeKind}
