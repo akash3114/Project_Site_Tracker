@@ -34,7 +34,7 @@ model, and operators who need to know what a request touches.
 | Database | PostgreSQL 16 via Prisma 6.19 (`prisma/schema.prisma`) |
 | Authentication | Auth.js / NextAuth v5 beta, Credentials provider, JWT session |
 | Password storage | `bcryptjs`, cost factor 12 |
-| Authorisation | Derived from assignment rows; **no account role column** |
+| Authorisation | Derived from assignment rows and the reporting line; **no account role column** |
 | Session gate | Edge middleware (`middleware.ts`) decoding the JWT cookie |
 | Per-request identity | `lib/access.ts#getSessionUser` re-reads the user from the DB |
 | File storage | Local filesystem (`UPLOAD_DIR`, default `<cwd>/uploads`) |
@@ -202,6 +202,8 @@ flowchart LR
 | Admin console | `app/(app)/admin/**` | Users, access, categories, projects, plazas, audit |
 | Route handlers | `app/api/**/route.ts` | JSON API, validation, authorisation, writes |
 | Access layer | `lib/access.ts` | Session identity, visibility queries, capability rules, assignee picker |
+| Reporting rules | `lib/reporting.ts` | Reporting-line validation (`managerCycleError`) |
+| Assignee labels | `lib/assignee-summary.ts` | Compact "First +N" summary shared by task lists |
 | Scope contract | `lib/task-scope.ts` | `Task.scope` semantics shared by server and client |
 | Task projections | `lib/task-data.ts` | Prisma includes, permission object, labels |
 | Validation | `lib/validations.ts` | Zod schemas, id rules, attachment limits |
@@ -211,7 +213,7 @@ flowchart LR
 | Auth | `lib/auth.ts`, `lib/auth.config.ts` | Credentials provider, JWT callbacks, edge-safe config |
 | Rate limit | `lib/rate-limit.ts` | In-memory login throttle |
 | DB client | `lib/db.ts` | Prisma singleton |
-| Schema | `prisma/schema.prisma` | 15 models, 7 enums |
+| Schema | `prisma/schema.prisma` | 16 models, 7 enums |
 | Migrations | `prisma/migrations/*` | Forward-only DDL, CHECKs and partial unique indexes |
 | Seed | `prisma/seed.ts`, `prisma/master-data.ts` | Demo catalogue and users |
 
@@ -338,7 +340,7 @@ cookies and the absence of CORS headers).
 
 ---
 
-## 7. Authorisation in one paragraph
+## 7. Authorisation model
 
 There is no `User.role` column. A person's display level is derived:
 
@@ -352,6 +354,29 @@ Site Manager (`PlazaAssignment`). Head Office is global. Department membership i
 display metadata and a task location, never a permission boundary. The full
 matrix, assignment ceiling and edge cases are in
 [`ACCESS-CONTROL.md`](./ACCESS-CONTROL.md).
+
+On top of scope, the reporting line widens what a person can see and change.
+`User.managerId` is a nullable self-reference; it grants nothing by itself and is
+validated by `lib/reporting.ts#managerCycleError`, which rejects self-management
+and cycles with `422`. Two derived relationships matter:
+
+* **Downline** — everyone below the caller in the chain, at any depth, resolved
+  by `lib/access.ts#descendantUserIds` with a `WITH RECURSIVE` CTE. Because the
+  CTE uses `UNION`, a bad link cannot loop. A task assigned to or created by
+  anyone in the downline is visible even when the caller has no project or plaza
+  grant on it; the same downline also opens the matching project and plaza pages.
+* **Manager above** — `managerAncestorIds` walks the same link upwards from a
+  task's assignees and creator. A caller on that chain who is neither assignee
+  nor creator is a manager-only observer: `resolveTaskAccess` returns
+  `role: "SITE_MANAGER"`, `scopeRole: null` and `isManagerAbove: true`.
+
+Status belongs to the people who own the work. `canChangeTaskStatus` allows an
+assignee, the creator, a manager-chain ancestor, or Admin/Head Office/Project
+Manager; visibility alone is not enough, so a same-plaza site-manager peer can
+view and comment but not move the status. Manager-only access carries no scope
+role, so it never grants core edits (`canEditTaskCore`) or reassignment
+(`taskPermissions().canAssign`). A manager who also holds a project or plaza
+assignment keeps that role's rights.
 
 ---
 
@@ -391,6 +416,20 @@ flowchart LR
   leave an activity row.
 * **Stable ids** — generated rows use `cuid()`; catalogue rows use slug ids such
   as `company_neppl`, `dept_fin`, `office_delhi`, `cat_toll_operations`.
+* **Assignees are a join table** — `TaskAssignee(taskId, userId, assignedById?,
+  assignedAt)` replaces the old single `Task.assigneeId`. A task has any number
+  of assignees with equal rights: the task appears on each of their boards and
+  any of them may change its status or comment. Creation accepts `assigneeIds`
+  (max 20, de-duplicated; `assigneeId` is a deprecated alias) and
+  `POST /api/tasks/:id/assign` is a replace-set that writes one `ASSIGNED`
+  activity per person added or removed. API payloads expose the flattened
+  `task.assignees: [{ id, name, assignedAt }]`; the detail route also returns the
+  picker list as `assigneeCandidates` when the caller may assign.
+* **Reporting line** — `User.managerId` is a nullable self-FK to `User` and the
+  only self-reference in the schema. It is not an access grant: visibility and
+  the manager status override are derived in `lib/access.ts` from the chain, and
+  `lib/reporting.ts#managerCycleError` rejects a self-manager, an inactive or
+  missing manager, and any link that would close a cycle (`422`).
 * **Soft archive** — master data is retired with `active = false`, never
   deleted while referenced. Users are deactivated, never deleted.
 * **Scope integrity** — `Task.scope` is an explicit discriminator backed by the
@@ -528,7 +567,7 @@ component framework beyond the small local UI primitives.
 | Observability | No structured logs, metrics or tracing | Incidents are debugged from container stdout |
 | Task scope | No DB constraint that `Task.plaza.projectId = Task.projectId` | API resolves it, raw SQL could violate it |
 | Activity shape | No per-type CHECK on `TaskActivity` | A row can carry fields its type does not use |
-| Assigner ids | `assignedById` on assignment tables has no FK | A deleted/renamed id would not be caught by the DB |
+| Assigner ids | `assignedById` on the grant tables (`HeadOfficeMembership`, `ProjectAssignment`, `PlazaAssignment`) has no FK | A deleted/renamed id would not be caught by the DB; `TaskAssignee.assignedById` does have one |
 | Audit vocabulary | `AuditLog.entity` and `action` are unconstrained text | Typos are possible; only writers enforce the vocabulary |
 | Unique indexes | Ignore `active` | Archiving keeps the name/code reserved |
 | Pagination | Only `/api/tasks` paginates | Project/plaza/user lists return everything |

@@ -2,8 +2,8 @@
 
 Project Site Tracker is a pilot web app for tracking toll-plaza site work across
 three companies, plus Head Office work scoped to a department. This folder is the
-documentation set: architecture, data model, API, access rules, operational
-runbooks and the decisions behind them.
+documentation set: architecture, data model, API, access and reporting rules,
+operational runbooks and the decisions behind them.
 
 Start with the path that matches your task.
 
@@ -71,7 +71,7 @@ flowchart TB
 | Document | What it covers | Status |
 |---|---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System context, containers, component map, request lifecycle, auth, deployment topology, trade-offs | Current |
-| [ERD.md](ERD.md) | Full and per-domain entity-relationship diagrams, cardinalities, constraints | Current |
+| [ERD.md](ERD.md) | Full and per-domain entity-relationship diagrams, cardinalities, constraints, multi-assignee and reporting relationships | Current |
 | [SCHEMA.md](SCHEMA.md) | Column-level data dictionary, enums, indexes, CHECK constraints, migration history | Current |
 | [DATABASE.md](DATABASE.md) | Intended database design, hierarchy, permission model, seed profile | Current |
 | [DATABASE-AUDIT.md](DATABASE-AUDIT.md) | The 2026-10 audit: findings, phases and applied changes | Historical + applied record |
@@ -79,7 +79,7 @@ flowchart TB
 | [ACCESS-CONTROL.md](ACCESS-CONTROL.md) | Derived roles, visibility, capability matrix, assignment ceiling, edge cases | Current |
 | [SEQUENCES.md](SEQUENCES.md) | Sequence diagrams for login, task lifecycle, reopen, uploads, audit | Current |
 | [OPERATIONS.md](OPERATIONS.md) | Environments, env vars, migrations, seed, deploy, backup, incidents | Current |
-| [DECISIONS.md](DECISIONS.md) | ADR-style record of the design decisions | Current |
+| [DECISIONS.md](DECISIONS.md) | ADR-style record of the design decisions, including multi-assignee tasks and the reporting hierarchy | Current |
 | [GLOSSARY.md](GLOSSARY.md) | Domain and technical terms, acronyms | Current |
 
 ## Operations and delivery
@@ -112,7 +112,7 @@ a pull request like any other code.
 | Where | Diagrams |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System context, containers, component map, deployment |
-| [ERD.md](ERD.md) | Full ERD plus people/access, delivery hierarchy, task history and audit views |
+| [ERD.md](ERD.md) | Full ERD plus people and reporting lines, delivery hierarchy, task history and audit views |
 | [SEQUENCES.md](SEQUENCES.md) | Login, page load, task list, task creation, assignment, status change, reopen, upload, audit, access update |
 | [DATABASE.md](DATABASE.md) | High-level entity diagram |
 | This page | Documentation map |

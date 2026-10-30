@@ -51,13 +51,14 @@ foreign keys, not duplicates.
 
 ## 1. Full model
 
-All 15 models and all 27 foreign-key relationships. Key columns only; see the
+All 16 models and all 30 foreign-key relationships. Key columns only; see the
 focused diagrams below and [`SCHEMA.md`](./SCHEMA.md) for the rest.
 
 ```mermaid
 erDiagram
     %% ---- People and access ------------------------------------------------
     Office ||--o{ User : "based at"
+    User ||--o{ User : "manages (reporting line)"
     User ||--o{ HeadOfficeMembership : "holds"
     Department ||--o{ HeadOfficeMembership : "granted by"
     User ||--o{ ProjectAssignment : "project manager"
@@ -74,7 +75,9 @@ erDiagram
     Plaza ||--o{ Task : "scopes"
     Department ||--o{ Task : "scopes"
     TaskCategory ||--o{ Task : "classifies"
-    User ||--o{ Task : "assignee"
+    Task ||--o{ TaskAssignee : "has"
+    User ||--o{ TaskAssignee : "is assignee"
+    User ||--o{ TaskAssignee : "assigned by"
     User ||--o{ Task : "creator"
     User ||--o{ Task : "completer"
     Task ||--o{ TaskActivity : "history"
@@ -95,6 +98,7 @@ erDiagram
         string id PK
         string email UK "also unique on lower(email)"
         string officeId FK "nullable"
+        string managerId FK "nullable, self-reference"
         bool isAdmin
         bool active
     }
@@ -169,13 +173,18 @@ erDiagram
         string plazaId FK "nullable"
         string departmentId FK "nullable"
         string categoryId FK "nullable"
-        string assigneeId FK "nullable"
         string createdById FK
         string completedById FK "nullable"
         date dueDate "nullable"
         datetime completedAt "nullable"
         enum status "TaskStatus"
         enum priority "Priority"
+    }
+    TaskAssignee {
+        string taskId PK,FK
+        string userId PK,FK
+        string assignedById FK "nullable"
+        datetime assignedAt
     }
     TaskActivity {
         string id PK
@@ -232,6 +241,7 @@ covers every company — while project and plaza assignments are scoped.
 ```mermaid
 erDiagram
     Office ||--o{ User : "based at"
+    User ||--o{ User : "manages (reporting line)"
     User ||--o{ HeadOfficeMembership : "holds"
     Department ||--o{ HeadOfficeMembership : "department"
     Company ||--o{ Project : "owns"
@@ -251,6 +261,7 @@ erDiagram
         bool isAdmin "platform administrator"
         bool active
         string officeId FK "nullable"
+        string managerId FK "nullable, self-reference"
         datetime createdAt
         datetime updatedAt
     }
@@ -327,6 +338,9 @@ Notes:
   `TOLL`, `MAINTENANCE` and `CORRIDOR` on the same plaza.
 * `assignedById` on all three assignment tables is a **plain text column with
   no foreign key**. It records who granted the row for display only.
+* `User.managerId` is the only self-reference. It is a reporting line, not an
+  access grant: visibility through it is derived in `lib/access.ts`, and the API
+  rejects self-management and cycles.
 * The `isPrimary` flags are not a normal column semantics: partial unique
   indexes enforce at most one `true` per user / project / plaza+role (see
   [constraints](#7-constraints-worth-knowing)). "Exactly one" is maintained by
@@ -420,9 +434,10 @@ Notes:
 
 ## 4. Tasks, history, attachments and the reopen workflow
 
-A task has exactly one scope, selected by `Task.scope`. History is append-only:
-comments are `TaskActivity` rows with `type = COMMENT`. Reopening a completed
-task is a request/approval row, not an edit to the task.
+A task has exactly one scope, selected by `Task.scope`. It carries a set of
+assignees through `TaskAssignee`; every assignee has the same rights. History is
+append-only: comments are `TaskActivity` rows with `type = COMMENT`. Reopening a
+completed task is a request/approval row, not an edit to the task.
 
 ```mermaid
 erDiagram
@@ -430,7 +445,9 @@ erDiagram
     Plaza ||--o{ Task : "PLAZA scope"
     Department ||--o{ Task : "DEPARTMENT scope"
     TaskCategory ||--o{ Task : "optional category"
-    User ||--o{ Task : "assignee"
+    Task ||--o{ TaskAssignee : "has"
+    User ||--o{ TaskAssignee : "is assignee"
+    User ||--o{ TaskAssignee : "assigned by"
     User ||--o{ Task : "creator"
     User ||--o{ Task : "completer"
     Task ||--o{ TaskActivity : "append-only stream"
@@ -455,13 +472,18 @@ erDiagram
         string description "nullable"
         enum status "TODO | IN_PROGRESS | BLOCKED | COMPLETED"
         enum priority "LOW | MEDIUM | HIGH"
-        string assigneeId FK "nullable, one assignee"
         string createdById FK
         date dueDate "nullable, date only"
         datetime completedAt "nullable"
         string completedById FK "nullable"
         datetime createdAt
         datetime updatedAt
+    }
+    TaskAssignee {
+        string taskId PK,FK
+        string userId PK,FK
+        string assignedById FK "nullable"
+        datetime assignedAt
     }
     TaskCategory {
         string id PK "cat_toll_operations etc."
@@ -523,6 +545,12 @@ Notes:
 * `TaskActivity` and `TaskReopenRequest` cascade with the task;
   `TaskAttachment` cascades with the task but only loses its `activityId`
   (`SetNull`) when an activity is removed.
+* `TaskAssignee` cascades with the task and is `Restrict` on the assignee, so a
+  person cannot be deleted while assigned. Removing an assignment is a delete of
+  the join row, not of the person or the task.
+* `TaskActivity.fromAssigneeId` / `toAssigneeId` remain single-user columns:
+  each `ASSIGNED` event records one person added or removed, even when a
+  replace-set request changes several at once.
 * Every user reference is `Restrict` after
   `20261029000000_integrity` — people are deactivated, never deleted.
 * At most one `PENDING` reopen request exists per task, enforced by a partial
@@ -637,7 +665,7 @@ Notes:
 
 ## 6. Relationship and cardinality
 
-Every foreign key in the database, with its delete behaviour. All 27 are
+Every foreign key in the database, with its delete behaviour. All 30 are
 `ON UPDATE CASCADE`; only `ON DELETE` differs. `Restrict` is the default for
 anything that would lose history; `Cascade` is limited to grants and task
 children.
@@ -645,32 +673,35 @@ children.
 | # | Parent → Child | Cardinality | FK column(s) | onDelete / onUpdate | Notes |
 |---|---|---|---|---|---|
 | 1 | `Office` → `User` | 1 : 0..N | `User.officeId` | `SET NULL` / `CASCADE` | office is optional metadata |
-| 2 | `Company` → `Project` | 1 : 0..N | `Project.companyId` | `RESTRICT` / `CASCADE` | a company cannot be deleted while it owns projects |
-| 3 | `Project` → `Plaza` | 1 : 0..N | `Plaza.projectId` | `RESTRICT` / `CASCADE` | archive the project instead of deleting it |
-| 4 | `User` → `HeadOfficeMembership` | 1 : 0..N | `HeadOfficeMembership.userId` | `CASCADE` / `CASCADE` | PK part of `(userId, departmentId)` |
-| 5 | `Department` → `HeadOfficeMembership` | 1 : 0..N | `HeadOfficeMembership.departmentId` | `CASCADE` / `CASCADE` | PK part; a department delete removes its grants |
-| 6 | `Project` → `ProjectAssignment` | 1 : 0..N | `ProjectAssignment.projectId` | `CASCADE` / `CASCADE` | PK part of `(projectId, userId)` |
-| 7 | `User` → `ProjectAssignment` | 1 : 0..N | `ProjectAssignment.userId` | `CASCADE` / `CASCADE` | PK part; grants are not history |
-| 8 | `Plaza` → `PlazaAssignment` | 1 : 0..N | `PlazaAssignment.plazaId` | `CASCADE` / `CASCADE` | PK part of `(plazaId, userId, role)` |
-| 9 | `User` → `PlazaAssignment` | 1 : 0..N | `PlazaAssignment.userId` | `CASCADE` / `CASCADE` | PK part |
-| 10 | `Project` → `Task` | 1 : 0..N | `Task.projectId` | `RESTRICT` / `CASCADE` | set for `PROJECT` and `PLAZA` scopes |
-| 11 | `Plaza` → `Task` | 1 : 0..N | `Task.plazaId` | `RESTRICT` / `CASCADE` | set for `PLAZA` scope only |
-| 12 | `Department` → `Task` | 1 : 0..N | `Task.departmentId` | `RESTRICT` / `CASCADE` | set for `DEPARTMENT` scope only |
-| 13 | `TaskCategory` → `Task` | 1 : 0..N | `Task.categoryId` | `SET NULL` / `CASCADE` | deleting a category keeps its tasks |
-| 14 | `User` → `Task` (assignee) | 1 : 0..N | `Task.assigneeId` | `RESTRICT` / `CASCADE` | nullable; one assignee per task |
-| 15 | `User` → `Task` (creator) | 1 : 0..N | `Task.createdById` | `RESTRICT` / `CASCADE` | not null on the child; every task has a creator |
-| 16 | `User` → `Task` (completer) | 1 : 0..N | `Task.completedById` | `RESTRICT` / `CASCADE` | nullable; set with `completedAt` |
-| 17 | `Task` → `TaskActivity` | 1 : 0..N | `TaskActivity.taskId` | `CASCADE` / `CASCADE` | append-only stream; cascades only with the task |
-| 18 | `User` → `TaskActivity` (actor) | 1 : 0..N | `TaskActivity.actorId` | `RESTRICT` / `CASCADE` | not null |
-| 19 | `User` → `TaskActivity` (from assignee) | 1 : 0..N | `TaskActivity.fromAssigneeId` | `RESTRICT` / `CASCADE` | nullable, `ASSIGNED` rows |
-| 20 | `User` → `TaskActivity` (to assignee) | 1 : 0..N | `TaskActivity.toAssigneeId` | `RESTRICT` / `CASCADE` | nullable, `ASSIGNED` rows |
-| 21 | `Task` → `TaskAttachment` | 1 : 0..N | `TaskAttachment.taskId` | `CASCADE` / `CASCADE` | files disappear with the task |
-| 22 | `TaskActivity` → `TaskAttachment` | 1 : 0..N | `TaskAttachment.activityId` | `SET NULL` / `CASCADE` | nullable; the file survives its activity |
-| 23 | `User` → `TaskAttachment` (uploader) | 1 : 0..N | `TaskAttachment.uploadedById` | `RESTRICT` / `CASCADE` | not null |
-| 24 | `Task` → `TaskReopenRequest` | 1 : 0..N | `TaskReopenRequest.taskId` | `CASCADE` / `CASCADE` | at most one `PENDING` per task |
-| 25 | `User` → `TaskReopenRequest` (requester) | 1 : 0..N | `TaskReopenRequest.requestedById` | `RESTRICT` / `CASCADE` | not null |
-| 26 | `User` → `TaskReopenRequest` (reviewer) | 1 : 0..N | `TaskReopenRequest.reviewedById` | `RESTRICT` / `CASCADE` | nullable |
-| 27 | `User` → `AuditLog` (actor) | 1 : 0..N | `AuditLog.actorId` | `RESTRICT` / `CASCADE` | the trail cannot lose its actor |
+| 2 | `User` → `User` (reports) | 0..1 : 0..N | `User.managerId` | `SET NULL` / `CASCADE` | self-FK reporting line; cycles rejected by the API |
+| 3 | `Company` → `Project` | 1 : 0..N | `Project.companyId` | `RESTRICT` / `CASCADE` | a company cannot be deleted while it owns projects |
+| 4 | `Project` → `Plaza` | 1 : 0..N | `Plaza.projectId` | `RESTRICT` / `CASCADE` | archive the project instead of deleting it |
+| 5 | `User` → `HeadOfficeMembership` | 1 : 0..N | `HeadOfficeMembership.userId` | `CASCADE` / `CASCADE` | PK part of `(userId, departmentId)` |
+| 6 | `Department` → `HeadOfficeMembership` | 1 : 0..N | `HeadOfficeMembership.departmentId` | `CASCADE` / `CASCADE` | PK part; a department delete removes its grants |
+| 7 | `Project` → `ProjectAssignment` | 1 : 0..N | `ProjectAssignment.projectId` | `CASCADE` / `CASCADE` | PK part of `(projectId, userId)` |
+| 8 | `User` → `ProjectAssignment` | 1 : 0..N | `ProjectAssignment.userId` | `CASCADE` / `CASCADE` | PK part; grants are not history |
+| 9 | `Plaza` → `PlazaAssignment` | 1 : 0..N | `PlazaAssignment.plazaId` | `CASCADE` / `CASCADE` | PK part of `(plazaId, userId, role)` |
+| 10 | `User` → `PlazaAssignment` | 1 : 0..N | `PlazaAssignment.userId` | `CASCADE` / `CASCADE` | PK part |
+| 11 | `Project` → `Task` | 1 : 0..N | `Task.projectId` | `RESTRICT` / `CASCADE` | set for `PROJECT` and `PLAZA` scopes |
+| 12 | `Plaza` → `Task` | 1 : 0..N | `Task.plazaId` | `RESTRICT` / `CASCADE` | set for `PLAZA` scope only |
+| 13 | `Department` → `Task` | 1 : 0..N | `Task.departmentId` | `RESTRICT` / `CASCADE` | set for `DEPARTMENT` scope only |
+| 14 | `TaskCategory` → `Task` | 1 : 0..N | `Task.categoryId` | `SET NULL` / `CASCADE` | deleting a category keeps its tasks |
+| 15 | `Task` → `TaskAssignee` | 1 : 0..N | `TaskAssignee.taskId` | `CASCADE` / `CASCADE` | PK part of `(taskId, userId)` |
+| 16 | `User` → `TaskAssignee` (assignee) | 1 : 0..N | `TaskAssignee.userId` | `RESTRICT` / `CASCADE` | PK part; any number of assignees per task |
+| 17 | `User` → `TaskAssignee` (assigner) | 1 : 0..N | `TaskAssignee.assignedById` | `SET NULL` / `CASCADE` | nullable; records who added the row |
+| 18 | `User` → `Task` (creator) | 1 : 0..N | `Task.createdById` | `RESTRICT` / `CASCADE` | not null on the child; every task has a creator |
+| 19 | `User` → `Task` (completer) | 1 : 0..N | `Task.completedById` | `RESTRICT` / `CASCADE` | nullable; set with `completedAt` |
+| 20 | `Task` → `TaskActivity` | 1 : 0..N | `TaskActivity.taskId` | `CASCADE` / `CASCADE` | append-only stream; cascades only with the task |
+| 21 | `User` → `TaskActivity` (actor) | 1 : 0..N | `TaskActivity.actorId` | `RESTRICT` / `CASCADE` | not null |
+| 22 | `User` → `TaskActivity` (from assignee) | 1 : 0..N | `TaskActivity.fromAssigneeId` | `RESTRICT` / `CASCADE` | nullable, `ASSIGNED` rows |
+| 23 | `User` → `TaskActivity` (to assignee) | 1 : 0..N | `TaskActivity.toAssigneeId` | `RESTRICT` / `CASCADE` | nullable, `ASSIGNED` rows |
+| 24 | `Task` → `TaskAttachment` | 1 : 0..N | `TaskAttachment.taskId` | `CASCADE` / `CASCADE` | files disappear with the task |
+| 25 | `TaskActivity` → `TaskAttachment` | 1 : 0..N | `TaskAttachment.activityId` | `SET NULL` / `CASCADE` | nullable; the file survives its activity |
+| 26 | `User` → `TaskAttachment` (uploader) | 1 : 0..N | `TaskAttachment.uploadedById` | `RESTRICT` / `CASCADE` | not null |
+| 27 | `Task` → `TaskReopenRequest` | 1 : 0..N | `TaskReopenRequest.taskId` | `CASCADE` / `CASCADE` | at most one `PENDING` per task |
+| 28 | `User` → `TaskReopenRequest` (requester) | 1 : 0..N | `TaskReopenRequest.requestedById` | `RESTRICT` / `CASCADE` | not null |
+| 29 | `User` → `TaskReopenRequest` (reviewer) | 1 : 0..N | `TaskReopenRequest.reviewedById` | `RESTRICT` / `CASCADE` | nullable |
+| 30 | `User` → `AuditLog` (actor) | 1 : 0..N | `AuditLog.actorId` | `RESTRICT` / `CASCADE` | the trail cannot lose its actor |
 
 Non-foreign-key links, listed so they are not mistaken for FKs:
 
@@ -789,8 +820,8 @@ fully agree. Documented as-is; not changed.
 4. **`AuditLog.entity` / `action` are unconstrained text.** The documented
    vocabulary is enforced only by the writers in `lib/audit.ts`.
 5. **`docs/DATABASE-AUDIT.md` §1 is stale.** It says "14 models, 6 enums" and
-   "4 files" of migration history; the database now has 15 models, 7 enums and
-   7 migrations. It is a historical record dated 2026-10-29, so it was left
+   "4 files" of migration history; the database now has 16 models, 7 enums and
+   8 migrations. It is a historical record dated 2026-10-29, so it was left
    untouched.
 6. **`Project.lengthKm` is retained but unused.** `DATABASE-AUDIT.md` §5.2 said
    to keep it only if a real project total exists. It still exists (nullable)

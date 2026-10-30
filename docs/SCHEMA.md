@@ -35,14 +35,15 @@ Model count: **15**. Enum count: **7**.
 9. [PlazaAssignment](#plazaassignment)
 10. [TaskCategory](#taskcategory)
 11. [Task](#task)
-12. [TaskActivity](#taskactivity)
-13. [TaskAttachment](#taskattachment)
-14. [TaskReopenRequest](#taskreopenrequest)
-15. [AuditLog](#auditlog)
-16. [Enums](#enums)
-17. [Constraints](#constraints)
-18. [Migration history](#migration-history)
-19. [Conventions and gotchas](#conventions-and-gotchas)
+12. [TaskAssignee](#taskassignee)
+13. [TaskActivity](#taskactivity)
+14. [TaskAttachment](#taskattachment)
+15. [TaskReopenRequest](#taskreopenrequest)
+16. [AuditLog](#auditlog)
+17. [Enums](#enums)
+18. [Constraints](#constraints)
+19. [Migration history](#migration-history)
+20. [Conventions and gotchas](#conventions-and-gotchas)
 
 ---
 
@@ -64,12 +65,14 @@ assignment rows.
 | `createdAt` | `timestamptz(3)` | no | `CURRENT_TIMESTAMP` | |
 | `updatedAt` | `timestamptz(3)` | no | — | client-managed |
 | `officeId` | `text` | yes | — | FK → `Office.id`, `SET NULL` |
+| `managerId` | `text` | yes | — | self-FK → `User.id`, `SET NULL`; reporting line, not an access grant |
 
-**Relations (out):** `officeId` → `Office`.
-**Relations (in):** `HeadOfficeMembership`, `ProjectAssignment`,
-`PlazaAssignment`, `Task` (assignee, creator, completer), `TaskActivity`
-(actor, from-assignee, to-assignee), `TaskAttachment.uploadedBy`,
-`TaskReopenRequest` (requester, reviewer), `AuditLog.actor`.
+**Relations (out):** `officeId` → `Office`, `managerId` → `User` (self).
+**Relations (in):** `User` (reports, self), `HeadOfficeMembership`,
+`ProjectAssignment`, `PlazaAssignment`, `TaskAssignee` (assignee, assigner),
+`Task` (creator, completer), `TaskActivity` (actor, from-assignee,
+to-assignee), `TaskAttachment.uploadedBy`, `TaskReopenRequest` (requester,
+reviewer), `AuditLog.actor`.
 
 **Indexes**
 
@@ -80,8 +83,10 @@ assignment rows.
 | `User_email_lower_key` | `UNIQUE (lower("email"))` |
 | `User_isAdmin_idx` | `("isAdmin")` |
 | `User_active_name_idx` | `("active", "name")` |
+| `User_managerId_idx` | `("managerId")` |
 
 **Constraints:** `User_officeId_fkey` → `Office(id)` `ON DELETE SET NULL
+ON UPDATE CASCADE`; `User_managerId_fkey` → `User(id)` `ON DELETE SET NULL
 ON UPDATE CASCADE`. Users are never deleted; every other user FK is `Restrict`.
 
 ---
@@ -350,7 +355,6 @@ enforced by `Task_scope_kind_check`.
 | `description` | `text` | yes | — | |
 | `status` | `"TaskStatus"` | no | `'TODO'` | `TODO` / `IN_PROGRESS` / `BLOCKED` / `COMPLETED` |
 | `priority` | `"Priority"` | no | `'MEDIUM'` | `LOW` / `MEDIUM` / `HIGH` |
-| `assigneeId` | `text` | yes | — | FK → `User.id`; one assignee per task |
 | `createdById` | `text` | no | — | FK → `User.id` |
 | `dueDate` | `date` | yes | — | date only, no time or zone |
 | `completedAt` | `timestamptz(3)` | yes | — | set when status becomes `COMPLETED` |
@@ -360,10 +364,15 @@ enforced by `Task_scope_kind_check`.
 
 **Relations:** `projectId` → `Project` (`Restrict`), `plazaId` → `Plaza`
 (`Restrict`), `departmentId` → `Department` (`Restrict`), `categoryId` →
-`TaskCategory` (`SET NULL`), `assigneeId` → `User` (`Restrict`), `createdById`
-→ `User` (`Restrict`), `completedById` → `User` (`Restrict`).
-**Relations (in):** `TaskActivity`, `TaskAttachment`, `TaskReopenRequest` (all
-`Cascade`).
+`TaskCategory` (`SET NULL`), `createdById` → `User` (`Restrict`),
+`completedById` → `User` (`Restrict`).
+**Relations (in):** `TaskAssignee`, `TaskActivity`, `TaskAttachment`,
+`TaskReopenRequest` (`TaskAssignee` cascades with the task; the rest cascade
+too).
+
+Assignees are a many-to-many set; `Task.assigneeId` was backfilled into
+[`TaskAssignee`](#taskassignee) and dropped in
+`20261029000003_task_assignees_and_reporting`.
 
 **Indexes**
 
@@ -374,7 +383,6 @@ enforced by `Task_scope_kind_check`.
 | `Task_plazaId_status_dueDate_idx` | `("plazaId", "status", "dueDate")` |
 | `Task_departmentId_status_dueDate_idx` | `("departmentId", "status", "dueDate")` |
 | `Task_scope_status_dueDate_idx` | `("scope", "status", "dueDate")` |
-| `Task_assigneeId_status_dueDate_idx` | `("assigneeId", "status", "dueDate")` |
 | `Task_categoryId_idx` | `("categoryId")` |
 | `Task_dueDate_idx` | `("dueDate")` |
 | `Task_status_idx` | `("status")` |
@@ -383,6 +391,40 @@ enforced by `Task_scope_kind_check`.
 | `Task_updatedAt_idx` | `("updatedAt")` |
 
 **Constraints:** `Task_scope_kind_check` (see [Constraints](#constraints)).
+
+---
+
+## TaskAssignee
+
+The assignee set for a task. One row per person; the pair is the primary key,
+so the same person cannot be assigned twice. Every assignee has equal rights and
+visibility — there is no primary or secondary assignee.
+
+| Column | Type | Null? | Default | Notes |
+|---|---|---|---|---|
+| `taskId` | `text` | no | — | PK part; FK → `Task.id` |
+| `userId` | `text` | no | — | PK part; FK → `User.id` |
+| `assignedById` | `text` | yes | — | FK → `User.id`; who added this person |
+| `assignedAt` | `timestamptz(3)` | no | `CURRENT_TIMESTAMP` | display order within a task |
+
+**Relations:** `taskId` → `Task` (`Cascade`), `userId` → `User` (`Restrict`),
+`assignedById` → `User` (`SET NULL`).
+**Relations (in):** none.
+
+**Indexes**
+
+| Name | Definition |
+|---|---|
+| `TaskAssignee_pkey` | `PRIMARY KEY ("taskId", "userId")` |
+| `TaskAssignee_userId_taskId_idx` | `("userId", "taskId")` |
+
+**Constraints:** `TaskAssignee_taskId_fkey` → `Task(id)` `ON DELETE CASCADE`;
+`TaskAssignee_userId_fkey` → `User(id)` `ON DELETE RESTRICT`;
+`TaskAssignee_assignedById_fkey` → `User(id)` `ON DELETE SET NULL`.
+
+The API replaces the whole set in one transaction
+(`POST /api/tasks/:id/assign`), writing one `ASSIGNED` activity per added or
+removed person. `GET /api/tasks?assigneeId=…` matches any row in this table.
 
 ---
 
@@ -633,7 +675,8 @@ re-point children. Delete behaviour by target:
 
 | Target | Referencing columns | `ON DELETE` |
 |---|---|---|
-| `User` | `Task.createdById`, `Task.assigneeId`, `Task.completedById`, `TaskActivity.actorId`, `TaskActivity.fromAssigneeId`, `TaskActivity.toAssigneeId`, `TaskAttachment.uploadedById`, `TaskReopenRequest.requestedById`, `TaskReopenRequest.reviewedById`, `AuditLog.actorId` | `RESTRICT` |
+| `User` | `Task.createdById`, `Task.completedById`, `TaskAssignee.userId`, `TaskActivity.actorId`, `TaskActivity.fromAssigneeId`, `TaskActivity.toAssigneeId`, `TaskAttachment.uploadedById`, `TaskReopenRequest.requestedById`, `TaskReopenRequest.reviewedById`, `AuditLog.actorId` | `RESTRICT` |
+| `User` | `TaskAssignee.assignedById`, `User.managerId` | `SET NULL` |
 | `User` | `HeadOfficeMembership.userId`, `ProjectAssignment.userId`, `PlazaAssignment.userId` | `CASCADE` (grants vanish) |
 | `Office` | `User.officeId` | `SET NULL` |
 | `Company` | `Project.companyId` | `RESTRICT` |
@@ -644,7 +687,7 @@ re-point children. Delete behaviour by target:
 | `Department` | `Task.departmentId` | `RESTRICT` |
 | `Department` | `HeadOfficeMembership.departmentId` | `CASCADE` |
 | `TaskCategory` | `Task.categoryId` | `SET NULL` |
-| `Task` | `TaskActivity.taskId`, `TaskAttachment.taskId`, `TaskReopenRequest.taskId` | `CASCADE` |
+| `Task` | `TaskActivity.taskId`, `TaskAttachment.taskId`, `TaskReopenRequest.taskId`, `TaskAssignee.taskId` | `CASCADE` |
 | `TaskActivity` | `TaskAttachment.activityId` | `SET NULL` |
 
 Consequence: a user delete is blocked by any task/activity/audit reference, and
@@ -655,9 +698,9 @@ silently. This is why the policy is "deactivate, never delete".
 
 ## Migration history
 
-Seven forward-only migrations. Order is the folder-name prefix. Dates in the
+Eight forward-only migrations. Order is the folder-name prefix. Dates in the
 prefix are the authoring dates; the four baseline migrations were applied to the
-dev database on **2026-10-29** during the rebuild, followed by the three
+dev database on **2026-10-29** during the rebuild, followed by the four
 `20261029*` migrations on the same day
 ([`DATABASE-AUDIT.md` §9](./DATABASE-AUDIT.md)). Production status is not
 recorded here.
@@ -671,6 +714,7 @@ recorded here.
 | 5 | `20261029000000_integrity` | 2026-10-29 | Phase 1: lowercases emails + `User_email_lower_key`; de-dupes `isPrimary` and adds the project/plaza partial unique indexes; converts all timestamps to `timestamptz(3)`; adds `Office.updatedAt`; index cleanup + composite indexes; makes every user FK `RESTRICT`; drops `_CompanyAssignment_backup` |
 | 6 | `20261029000001_office_updated_at` | 2026-10-29 | Drops the temporary `DEFAULT CURRENT_TIMESTAMP` on `Office.updatedAt` so Prisma's `@updatedAt` owns it |
 | 7 | `20261029000002_scope_audit_locations` | 2026-10-29 | Phase 2: `TaskScopeKind` + `Task.scope` backfill + `Task_scope_kind_check` (drops the two old CHECKs); drops `Plaza.state/piu/ro`; rewrites Company/Department/Office/TaskCategory ids to slug form; creates `AuditLog` |
+| 8 | `20261029000003_task_assignees_and_reporting` | 2026-10-29 | Adds `TaskAssignee` (PK `taskId, userId`), backfills `Task.assigneeId` into it, then drops the column and its index; adds `User.managerId` self-FK + index |
 
 Notes on ordering:
 
@@ -678,8 +722,7 @@ Notes on ordering:
   index **before** the backfill would violate it — the backfill inserts one
   `DISTINCT` row per user, so it holds.
 * Migration 5 re-creates five user FKs as `RESTRICT`; before it, assignee /
-  completer / reviewer references were `SET NULL`.
-* Migration 7 is the only one that changes primary-key values. It relies on
+  completer / reviewer references were `SET NULL`.* Migration 7 is the only one that changes primary-key values. It relies on
   `ON UPDATE CASCADE` and leaves cuids in place for generated rows.
 
 ---

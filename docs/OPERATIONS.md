@@ -87,7 +87,8 @@ npm run seed
 npm run dev
 ```
 
-Open `http://localhost:3000`. The seed prints its row counts as JSON.
+Open `http://localhost:3000`. The seed prints its row counts as JSON; a fresh
+seed reports `taskAssignees: 50`.
 
 ### Checks before a commit
 
@@ -102,7 +103,8 @@ node scripts/check-docs-links.mjs # docs only
 `scripts/smoke-api.mjs` creates tasks, attachments and a throwaway user, then
 removes them. It asserts the seed floor (`≥ 47` tasks, 3 companies, 28 projects,
 46 plazas, 18 departments, 20 memberships), role-specific access, the completed
-lock, batch creation, assignment ceilings and attachment round-trips.
+lock, batch creation, assignment ceilings, the multi-assignee replace-set,
+reporting-line visibility and cycle rejection, and attachment round-trips.
 
 ---
 
@@ -120,6 +122,12 @@ flowchart LR
   E --> F["Deploy: migrate service runs prisma migrate deploy"]
   F --> G["Verify migrate status + migrate diff"]
 ```
+
+Recent structural changes are a useful pattern to copy:
+`20261029000003_task_assignees_and_reporting` creates `TaskAssignee`, backfills
+the old `Task.assigneeId` into it, then drops that column and its index in the
+same migration, and adds the `User.managerId` self-FK. A backfill must always run
+before the old column is dropped.
 
 ### Create a migration (development)
 
@@ -194,11 +202,16 @@ $env:SEED_RESET="1"; npm run seed   # wipe + rebuild
 * Refuses to run when users exist unless `SEED_RESET=1` (it prints a skip
   message).
 * With `SEED_RESET=1`, deletes in FK-safe order, then recreates catalogue,
-  people, assignments, tasks, activities and one pending reopen request.
+  people, scope assignments, tasks, task assignees, activities and one pending
+  reopen request.
 * Uses stable ids for catalogue rows (`company_neppl`, `dept_fin`,
   `office_delhi`, `cat_toll_operations`, …) so every environment matches.
 * Creates demo logins on a shared password (`Tracker@123` for field users,
   `Manage@123` for Head Office, `Admin@123` for the admin). These are demo-only.
+* Seeds a demo reporting line: plaza staff report to the first project manager
+  of their first project, project managers and Head Office leads report to the
+  `management@tracker.local` account, and that account reports to the admin.
+  111 of 112 users have a manager; the admin is the root.
 
 Seed profile (verified by the seed's own output):
 
@@ -213,11 +226,14 @@ Seed profile (verified by the seed's own output):
 | Head Office memberships | 20 |
 | Task categories | 6 |
 | Tasks | 47 (6 project-level, 35 plaza, 6 department) |
+| Task assignees | 50 (3 tasks have two assignees) |
 | Task activities | 138 |
 | Pending reopen requests | 1 |
 
 **Warning:** `SEED_RESET=1` deletes every row in every table. Never run it
-against a database with real work. The seed is for first boot and demos only.
+against a database with real work. It also rebuilds the 50 task-assignee links
+and the demo reporting line, so manual reassignments and reporting changes are
+not preserved. The seed is for first boot and demos only.
 
 ---
 
@@ -418,7 +434,8 @@ Master data is archived with `active = false`; nothing is deleted.
 
 * **Task history:** `GET /api/events?take=500` (Admin/HO) or open the task's
   activity feed. Each row has actor, type, from/to status, from/to assignee,
-  text and timestamp.
+  text and timestamp. Assignment changes write one `ASSIGNED` row per person
+  added or removed.
 * **Master data:** `GET /api/audit?entity=Project&entityId=...&take=500`.
   `before`/`after` are JSON snapshots.
 * **Who changed access:** filter `entity=PlazaAssignment` or
@@ -447,6 +464,7 @@ All of these are Admin actions unless noted.
 | Reset the admin password | `npm run reset-admin -- admin@tracker.local '<new-password>'` |
 | Rotate the shared field password | `npm run rotate-managers -- '<new-password>'` |
 | Deactivate a leaver | Admin → Users → set inactive. Never delete the user. |
+| Change a reporting line | Admin → Users → Reports to, or `PATCH /api/users/:id { managerId }` |
 | Add a Head Office member | Admin → Users → Head Office departments, or `POST /api/head-office-memberships` |
 | Make a department primary | `PUT /api/head-office-memberships { isPrimary: true }` |
 | Grant project management | `POST /api/project-assignments` |
@@ -454,6 +472,12 @@ All of these are Admin actions unless noted.
 | Archive a project/plaza | Admin → Projects/Plazas → edit → set inactive |
 | Create a task category | Admin → Categories |
 | Investigate a change | Admin → Audit trail, or `GET /api/audit` |
+
+Reporting lines are seeded and editable in Admin → Users ("Reports to"). Changing
+one changes downline visibility and the status rights of managers above the
+work; it does **not** add or remove `ProjectAssignment`, `PlazaAssignment` or
+`HeadOfficeMembership` scope grants. Self-links, inactive managers and cycles
+are rejected with `422` (`lib/reporting.ts`).
 
 `npm run reset-admin` and `npm run rotate-managers` run `tsx` scripts against
 `DATABASE_URL`; in production run them inside the `migrate` (tools) container:

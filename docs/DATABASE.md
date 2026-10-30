@@ -33,7 +33,10 @@ erDiagram
     users ||--o{ head_office_memberships : "HEAD_OFFICE"
     users ||--o{ project_assignments : "project manager"
     users ||--o{ plaza_assignments : "Toll/Maint/Corridor"
-    users ||--o{ tasks : "assignee"
+    users ||--o{ users : "reports to (managerId)"
+    tasks ||--o{ task_assignees : "has"
+    users ||--o{ task_assignees : "assignee"
+    users ||--o{ task_assignees : "assigned by"
     users ||--o{ tasks : "creator"
     tasks ||--o{ task_activities : "append-only feed"
     tasks ||--o{ task_attachments : "files"
@@ -51,6 +54,7 @@ erDiagram
         boolean isAdmin "platform admin flag"
         boolean active
         string officeId FK "nullable"
+        string managerId FK "nullable, self-reference"
     }
     companies {
         string id PK
@@ -128,11 +132,16 @@ erDiagram
         string description "nullable"
         TaskStatus status
         Priority priority "LOW | MEDIUM | HIGH"
-        string assigneeId "nullable"
         string createdById FK
         date dueDate "nullable"
         datetime completedAt "nullable"
         string completedById "nullable"
+    }
+    task_assignees {
+        string taskId FK_PK
+        string userId FK_PK
+        string assignedById FK "nullable"
+        datetime assignedAt
     }
     audit_logs {
         string id PK
@@ -187,9 +196,12 @@ erDiagram
 * **User** — login identity (`email` unique), display name, optional phone,
   optional `title` (job title shown in assignee pickers, e.g. `Operations
   Manager`; falls back to the derived role label), bcrypt `passwordHash`,
-  `isAdmin`, `active`, and a nullable `officeId` (the office the person sits
-  in). Deactivating sets `active=false`; users are never deleted, so task
-  history keeps its actor/assignee joins.
+  `isAdmin`, `active`, a nullable `officeId` (the office the person sits
+  in), and a nullable `managerId` self-reference (the reporting line). The
+  reporting line is not a scope grant: it widens visibility and status rights
+  for the person above, but adds no project or plaza assignment. Deactivating
+  sets `active=false`; users are never deleted, so task history keeps its
+  actor/assignee joins.
 * **Company** — `name` and `code` are unique; `active` soft-archives.
 * **Department** — global Head Office catalogue shared by every company:
   `name` and `code` are unique, `sortOrder` drives display order, `active`
@@ -238,10 +250,16 @@ erDiagram
   | `DEPARTMENT` | null | null | set | Department task (Head Office) |
   | `HEAD_OFFICE` | null | null | null | Head Office-level task |
 
-  `status` starts at `TODO`; `assigneeId` is optional (one assignee per task);
-  `dueDate` is a date; `completedAt` / `completedById` record completion.
+  `status` starts at `TODO`; the assignee set is a many-to-many relation through
+  `TaskAssignee` (any number of equal assignees, at most 20 per task through the
+  API); `dueDate` is a date; `completedAt` / `completedById` record completion.
   Deleting a project/plaza/department with tasks is blocked
   (`onDelete: Restrict`) — archive the project/plaza instead.
+* **TaskAssignee** — join row `@@id([taskId, userId])` with an optional
+  `assignedById` and `assignedAt`. Every assignee has the same rights: the task
+  appears on each of their boards, and any of them may comment or change status.
+  The API replaces the whole set (`{ assigneeIds: [] }`) in one transaction and
+  writes one `ASSIGNED` activity per person added or removed.
 * **TaskActivity** — immutable, append-only history and comments in one stream.
   A comment is simply `type = COMMENT` with `text`. Rows record the actor,
   optional status transition (`fromStatus` → `toStatus`), optional assignee
@@ -302,13 +320,15 @@ erDiagram
 | One primary project manager per project | partial unique index `ProjectAssignment_projectId_primary_key` |
 | One primary holder per plaza + role | partial unique index `PlazaAssignment_plazaId_role_primary_key` |
 | Task history/attachments/reopen rows vanish only with the task | `Task` children → `Cascade` |
+| Assignments vanish with the task; people cannot be deleted while assigned | `TaskAssignee.task` → `Cascade`; `TaskAssignee.user` → `Restrict` |
+| Clearing a manager keeps the person | `User.manager` → `SetNull` |
 | Deleting a category keeps tasks | `Task.category` → `SetNull` |
 | One pending reopen request per task | partial unique index shown above |
 | Project names unique per company; plaza names unique per project | `@@unique([companyId, name])`, `@@unique([projectId, name])` |
 | Email is unique case-insensitively | exact unique index + `User_email_lower_key` on `lower(email)` |
 | Audit rows are never deleted with their actor | `AuditLog.actor` → `onDelete: Restrict` |
 | Archived, not completed | `Project.active` / `Plaza.active` booleans only |
-| No account role column | access derived from `isAdmin` + assignment rows |
+| No account role column | access derived from `isAdmin` + assignment rows + the reporting line |
 
 The Head Office primary rule is hand-written in the migration because Prisma
 cannot express a partial unique index:
@@ -339,13 +359,18 @@ project/plaza assignments, or no access); an Admin can always re-grant it.
 | Companies | all | all | via visible projects | via visible plazas |
 | Projects | all | all | assigned projects | projects with an assigned plaza |
 | Plazas | all | all | all plazas in assigned projects | assigned plazas only |
-| Tasks | all | all | all tasks in assigned projects (incl. project-level) + Head Office tasks assigned to them | tasks in assigned plazas + project-level and Head Office tasks assigned to them |
+| Tasks | all | all | all tasks in assigned projects (incl. project-level), Head Office tasks assigned to them, plus tasks assigned to or created by their downline | tasks in assigned plazas, project-level and Head Office tasks assigned to them, plus tasks assigned to or created by their downline |
 
 * Head Office is global by design: one department membership grants every
   company, project, plaza and task. Departments and offices never narrow access.
+* The reporting line is additive: `taskScopeWhere` also includes tasks assigned
+  to or created by anyone below the caller, at any depth. It does not narrow or
+  replace the scope clauses.
 * A site manager assigned a **project-level task** can read/act on that task even
   without a plaza on that project, but the project/plaza pages still require a
   project or plaza assignment (`requireProjectAccess` / `requirePlazaAccess`).
+  Those helpers also include downline work, so a manager can open the page that
+  contains a junior's task.
 * `GET /api/projects`, `/api/plazas` and `/api/tasks` all apply the same
   `accessibleProjectIds` / `accessiblePlazaIds` / `taskScopeWhere` scope.
 
@@ -359,9 +384,14 @@ Site Manager** (`effectiveTaskRole`):
 3. `ProjectAssignment` on the task's project → `PROJECT_MANAGER`.
 4. `PlazaAssignment` on the task's plaza → `SITE_MANAGER`.
 5. Head Office task (`departmentId != null` or `projectId == null`) →
-   `SITE_MANAGER` only when `assigneeId === user.id`, else `null`.
-6. No plaza on a project task and `assigneeId === user.id` → `SITE_MANAGER`
-   (the project-level fallback).
+   `SITE_MANAGER` when the caller is an assignee, the creator, or a manager above
+   either, else `null`.
+6. No plaza on a project task and the caller is an assignee, the creator, or a
+   manager above either → `SITE_MANAGER` (the project-level fallback).
+
+A manager-only observer (reporting-line ancestor, no scope role) resolves to
+`SITE_MANAGER` with `scopeRole: null`. That grants view, comment and status
+rights, but not core edits or reassignment.
 
 The derived display role for navigation uses `isAdmin ? ADMIN :
 headOfficeMemberships.length > 0 ? HEAD_OFFICE : PROJECT_MANAGER`; the header
@@ -379,7 +409,7 @@ metadata only — they do not change any role, capability or approval.
 | Manage Head Office memberships and project/plaza assignments | yes | yes | no | no |
 | Create tasks | any project, plaza, department or Head Office level | any project, plaza, department or Head Office level | assigned projects (project or plaza scope) | assigned plazas only (plaza scope) |
 | Edit task core fields | any task | any task | tasks in assigned projects | only tasks they created |
-| Change status / comment / attach | any task | any task | assigned projects | assigned plazas + assigned project-level tasks |
+| Change status / comment / attach | any task | any task | assigned projects | assignees, creators, managers above, plus plaza tasks they can see (a same-plaza peer who is none of these can comment but not change status) |
 | View audit trail | yes | yes | no | no |
 | Delete a project | yes | no | no | no |
 | Reopen a completed task directly | yes | yes | no | no |
@@ -388,7 +418,9 @@ metadata only — they do not change any role, capability or approval.
 
 ### Assignment ceiling
 
-`canAssignTo` / `assigneeCandidates` cap who a user may assign:
+`canAssignTo` / `assigneeCandidates` cap who a user may assign. The endpoint is
+a replace-set: `POST /api/tasks/:id/assign` takes the complete `assigneeIds`
+array (up to 20, de-duplicated); every id is checked independently.
 
 | Actor role | May assign |
 |---|---|
@@ -397,10 +429,10 @@ metadata only — they do not change any role, capability or approval.
 | Site Manager | the project manager or site managers on the same plaza — never Admin/Head Office |
 
 Assignees must be active. Completed tasks lock assignment changes
-(`taskPermissions.canAssign` is false). **Head Office tasks** (department or
-Head Office level) are stricter: only Admin/Head Office may (re)assign them,
-whatever the task creator's role; a PM or site manager may be the assignee but
-cannot change it.
+(`taskPermissions.canAssign` is false), and a manager-only observer cannot
+reassign. **Head Office tasks** (department or Head Office level) are stricter:
+only Admin/Head Office may (re)assign them, whatever the task creator's role; a
+PM or site manager may be the assignee but cannot change it.
 
 ### Task scopes and batch creation
 
@@ -416,7 +448,8 @@ The assignee picker offers only users associated with the scope — department
 membership for a department or Head Office-level task, project assignment for a
 project, plaza assignment for a plaza — plus the current user. That list is
 guidance, not the permission boundary: the assignment ceiling (`canAssignTo`)
-still validates every assignment on the API independently.
+still validates every assignment on the API independently. The picker is
+multi-select; choosing nobody clears the set.
 
 ### Completed-task lock and reopen workflow
 

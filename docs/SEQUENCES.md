@@ -159,7 +159,7 @@ sequenceDiagram
       end
     end
     R->>A: taskScopeWhere(user)
-    A->>D: project + plaza assignments (unless Admin/HO)
+    A->>D: project/plaza assignments + downline ids (unless Admin/HO)
     A-->>R: Prisma WHERE (OR of clauses)
     R->>D: task.count(where)
     R->>D: task.findMany(where, updatedAt desc, skip/take)
@@ -174,11 +174,13 @@ sequenceDiagram
   `taskScopeWhere(user)` plus explicit constraints.
 * Filters: `plazaId`, `projectId`, `departmentId`, `headOffice=true`, `status`,
   `priority`, `categoryId`, `assigneeId` (`me` resolves to the caller),
-  `overdue=true`, `q` (title contains, case-insensitive), `page`, `pageSize`.
+  `overdue=true`, `q` (title or assignee name, case-insensitive), `page`,
+  `pageSize`.
 * `overdue=true` adds `dueDate < todayIst()` **and** `status != COMPLETED`; it
   overrides `status`.
 * `lib/access.ts#taskScopeWhere` — Admin/HO get `{}`; otherwise the union of
-  project assignments, plaza assignments and `assigneeId = user.id`.
+  project assignments, plaza assignments, tasks assigned to the caller, tasks
+  they created, and tasks assigned to or created by their downline.
 * Ordering is `updatedAt desc`; there is no configurable sort.
 
 ---
@@ -195,15 +197,16 @@ sequenceDiagram
   participant A as access.ts
   participant D as PostgreSQL
 
-  C->>R: { projectId? plazaId? departmentId?, title, ... }
+  C->>R: { projectId? plazaId? departmentId?, title, assigneeIds: [...], ... }
   R->>A: getSessionUser()
   alt no session
     R-->>C: 401
   else session
     R->>R: createTaskSchema.safeParse(body)
-    alt invalid
+    alt invalid (bad shape, more than 20 assignee ids)
       R-->>C: 400 Invalid input + issues
     else valid
+      R->>R: de-duplicate assigneeIds; assigneeId alias → [assigneeId]
       R->>D: category lookup (if categoryId)
       alt category missing or inactive
         R-->>C: 422 Category not found or inactive
@@ -224,20 +227,20 @@ sequenceDiagram
       alt no role in scope
         R-->>C: 403 Forbidden
       end
-      opt assigneeId supplied
+      loop each assigneeId
         R->>A: canAssignTo(actorRole, scope, assigneeId)
         alt not allowed
           R-->>C: 422 That person cannot be assigned in this scope
         end
       end
       R->>D: $transaction
-      D->>D: task.create(scope, columns, createdBy)
+      D->>D: task.create(scope, columns, createdBy, assignees: create[])
       D->>D: taskActivity CREATED
-      opt assigneeId
-        D->>D: taskActivity ASSIGNED
+      loop each assignee
+        D->>D: taskActivity ASSIGNED (toAssigneeId)
       end
       D-->>R: task with includes
-      R-->>C: 201 task JSON
+      R-->>C: 201 task JSON { assignees: [{ id, name, assignedAt }] }
     end
   end
 ```
@@ -246,14 +249,19 @@ sequenceDiagram
 
 * `app/api/tasks/route.ts#POST` — detects batch mode by the presence of a
   `scopes` array; otherwise validates with `createTaskSchema`.
+* `assigneeIds` is optional, capped at `MAX_TASK_ASSIGNEES` (20) and
+  de-duplicated by the schema transform. `assigneeId` is a deprecated alias for
+  a one-element list; when both are absent the task is created unassigned.
 * `resolveScope()` — department first, then plaza (resolving its project), then
   project, otherwise Head Office level (`scope = HEAD_OFFICE`, no location
   columns).
-* `scopeAccessError()` — combines `canCreateTask`, `actorScopeRole` and
-  `canAssignTo`.
-* `createScopedTask()` — writes `Task` + `CREATED` activity, plus a second
-  `ASSIGNED` activity when an assignee was supplied. The activity text varies by
-  scope ("Project-level task created", "Department task created · Finance", …).
+* `scopeAccessError()` — combines `canCreateTask`, `actorScopeRole` and one
+  `canAssignTo` check per requested assignee.
+* `createScopedTask()` — writes `Task` + one `TaskAssignee` row per assignee
+  (`assignedById` = caller) + a `CREATED` activity (its `toAssigneeId` is the
+  first assignee), then one `ASSIGNED` activity per assignee. The activity text
+  varies by scope ("Project-level task created", "Department task created ·
+  Finance", …).
 * `scopeKindOf()` — stores `DEPARTMENT`, `PLAZA`, `PROJECT` or `HEAD_OFFICE` in
   `Task.scope`, matching the DB CHECK.
 * Due date is parsed as `new Date("YYYY-MM-DDT00:00:00Z")`, i.e. UTC midnight.
@@ -272,7 +280,7 @@ sequenceDiagram
   R->>D: category check
   loop each scope
     R->>D: resolveScope(scope)
-    R->>R: scopeAccessError(scope, assigneeId)
+    R->>R: scopeAccessError(scope, assigneeIds)
   end
   alt any scope invalid or forbidden
     R-->>C: first failure, nothing written
@@ -289,14 +297,18 @@ sequenceDiagram
   single bad scope writes nothing.
 * `batchScopeKey()` de-duplicates by `department:<id>`, `plaza:<id>`,
   `project:<id>` or `head-office`.
-* The same title, description, priority, due date, category and assignee are
-  applied to every created task.
+* The same title, description, priority, due date, category and assignee set
+  are applied to every created task.
 
 ---
 
 ## 5. Assignment with the ceiling
 
-**When:** a user picks a different assignee (or clears it) on a task.
+**When:** a user changes the team on a task — adds people, removes people, or
+clears the set.
+
+The endpoint is a **replace-set**: the body is the complete desired assignee
+list, not a single change.
 
 ```mermaid
 sequenceDiagram
@@ -306,11 +318,11 @@ sequenceDiagram
   participant A as access.ts
   participant D as PostgreSQL
 
-  C->>R: { assigneeId: string | null }
+  C->>R: { assigneeIds: string[] }  (empty array clears)
   R->>A: getSessionUser()
   R->>R: assignSchema.safeParse
-  alt invalid
-    R-->>C: 400
+  alt neither assigneeIds nor assigneeId supplied
+    R-->>C: 400 Invalid input (Provide assigneeIds)
   else valid
     R->>A: requireTaskAccess(user, taskId)
     alt no access
@@ -320,30 +332,48 @@ sequenceDiagram
     alt task.status = COMPLETED
       R-->>C: 423 Task is completed. Reopen it before reassigning.
     end
-    R->>A: taskPermissions(user, task, role)
+    R->>A: taskPermissions(user, task, access)
     alt canAssign = false
       R-->>C: 403 Forbidden
     end
-    opt assigneeId not null
-      R->>A: canAssignTo(role, scope, assigneeId)
+    loop each requested assignee
+      R->>A: canAssignTo(access.role, scope, assigneeId)
       alt not allowed
         R-->>C: 422 That person cannot be assigned in this scope
       end
     end
     R->>D: $transaction
-    D->>D: task.update({ assigneeId })
-    D->>D: taskActivity ASSIGNED (from/to assignee)
+    D->>D: read current TaskAssignee rows
+    D->>D: delta = removed / added (unchanged rows untouched)
+    opt removed
+      D->>D: taskAssignee.deleteMany(removed)
+      D->>D: taskActivity ASSIGNED (fromAssigneeId) per removed
+    end
+    opt added
+      D->>D: taskAssignee.createMany(added, assignedById = caller)
+      D->>D: taskActivity ASSIGNED (toAssigneeId) per added
+    end
+    D->>D: task.update(updatedAt = now)
     D-->>R: updated task
-    R-->>C: 200 task JSON
+    R-->>C: 200 task JSON { assignees: [...] }
   end
 ```
 
 **Implementation notes**
 
 * `app/api/tasks/[id]/assign/route.ts`.
-* `taskPermissions().canAssign` — false when completed; for Head Office tasks
-  (department or Head Office level) only Admin/HO may assign; project tasks keep
-  the normal ceiling.
+* `assignSchema` — `assigneeIds` (max 20, de-duplicated) plus the deprecated
+  `assigneeId` alias; a request must carry one of them. An empty array clears
+  every assignee.
+* Replace-set semantics: unchanged rows are left alone, so their `assignedAt`
+  survives. Only the delta is written, and there is exactly one `ASSIGNED`
+  activity per person added or removed (`fromAssigneeId` or `toAssigneeId`).
+* `Task.updatedAt` is touched even when the set did not change, so
+  `updatedAt desc` lists stay accurate.
+* `taskPermissions().canAssign` — false when completed and false when the caller
+  has no scope role (`access.scopeRole === null`), so a manager-only observer
+  cannot reassign. For Head Office tasks (department or Head Office level) only
+  Admin/HO may assign; project tasks keep the normal ceiling.
 * `lib/access.ts#canAssignTo` — Admin/HO may assign any active user at any
   scope; department scope is Admin/HO only; a PM may assign Admin, HO, project
   PMs and site managers in the project; a site manager may assign the project PM
@@ -351,12 +381,85 @@ sequenceDiagram
 * `targetRoleOnScope()` is the target-side check: active user, Admin, any HO
   membership (global), project assignment on the project, or plaza assignment on
   the plaza (any plaza in the project when the task is project-level).
-* Clearing the assignee is always allowed by the ceiling check (it is skipped
-  when `assigneeId` is null) but still requires `canAssign`.
+* Clearing the assignees is always allowed by the ceiling check (the loop does
+  not run for an empty array) but still requires `canAssign`.
 
 ---
 
-## 6. Status change
+## 6. Manager visibility and status (reporting line)
+
+**When:** a junior creates a task, or is assigned one, and their manager has no
+project or plaza grant covering it. The reporting line (`User.managerId`) is the
+only link between them.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant J as Junior (assignee/creator)
+  participant M as Manager (reporting ancestor)
+  participant L as GET /api/tasks
+  participant R as Task routes
+  participant A as access.ts
+  participant D as PostgreSQL
+
+  J->>R: POST /api/tasks (create) or /assign (add)
+  Note over D: createdById or a TaskAssignee row records the junior
+  M->>L: GET /api/tasks
+  L->>A: taskScopeWhere(manager)
+  A->>D: descendantUserIds(manager) — recursive CTE
+  A-->>L: OR [ scope clauses, assignees in downline, createdById in downline ]
+  L->>D: task.findMany(where, updatedAt desc)
+  L-->>M: items include the junior's task
+  M->>R: GET /api/tasks/:id
+  R->>A: requireTaskAccess(manager, taskId)
+  A->>A: managerAncestorIds(assignees + creator)
+  A-->>R: { role: SITE_MANAGER, scopeRole: null, isManagerAbove: true }
+  R-->>M: task + permissions { canChangeStatus: true, canEdit: false, canAssign: false }
+  M->>R: POST /api/tasks/:id/status { to: IN_PROGRESS }
+  R->>A: canChangeTaskStatus(access)
+  A-->>R: true (isManagerAbove)
+  R->>D: task.update(status) + taskActivity STATUS_CHANGED
+  R-->>M: 200 task JSON
+  M->>R: POST /api/tasks/:id/comments { text }
+  R->>D: taskActivity COMMENT
+  R-->>M: 201 comment activity
+  M->>R: PATCH /api/tasks/:id { title }
+  R->>A: canEditTaskCore(user, task, role)
+  A-->>R: false (SITE_MANAGER and not the creator)
+  R-->>M: 403 Forbidden
+  M->>R: POST /api/tasks/:id/assign { assigneeIds }
+  R->>A: taskPermissions().canAssign
+  A-->>R: false (scopeRole is null)
+  R-->>M: 403 Forbidden
+```
+
+**Implementation notes**
+
+* `lib/access.ts#descendantUserIds` — everyone below the caller in the reporting
+  chain, at any depth. The `WITH RECURSIVE` CTE uses `UNION` (not `UNION ALL`),
+  so a bad manager link cannot loop forever.
+* Visibility is additive: the existing project/plaza/own-work clauses plus
+  "assigned to or created by anyone in the downline". `accessibleProjectIds`,
+  `accessiblePlazaIds`, `requireProjectAccess` and `requirePlazaAccess` use the
+  same downline, so the project and plaza pages open as well.
+* `resolveTaskAccess` — access comes from a global role, a scope role, being an
+  assignee or creator, or being a manager above. Manager-only access returns
+  `role: "SITE_MANAGER"` with `scopeRole: null` and `isManagerAbove: true`; a
+  manager who also holds a project or plaza assignment keeps that role instead.
+* Status: `canChangeTaskStatus` allows an assignee, the creator, a manager-chain
+  ancestor, or Admin/Head Office/Project Manager. A same-plaza site-manager peer
+  can view and comment but gets `403` from the status route.
+* Edit and reassign: `canEditTaskCore` needs Admin/HO/PM or the creator, and
+  `taskPermissions().canAssign` needs a scope role — so manager-only access
+  grants neither. Comments and uploads are open to anyone `requireTaskAccess`
+  admits.
+* `lib/reporting.ts#managerCycleError` rejects a self-manager and any link that
+  would close a cycle with `422`; it also rejects an inactive or missing
+  manager.
+
+---
+
+## 7. Status change
 
 **When:** a user moves a task between TODO, IN_PROGRESS, BLOCKED and COMPLETED.
 
@@ -382,6 +485,10 @@ sequenceDiagram
     alt task.status = COMPLETED
       R-->>C: 422 Task is completed. Request or approve a reopen first.
     end
+    R->>A: canChangeTaskStatus(access)
+    alt not an owner, manager above, Admin/HO/PM
+      R-->>C: 403 Forbidden
+    end
     R->>T: canTransition(from, to)
     alt illegal
       R-->>C: 422 Illegal transition FROM -> TO
@@ -397,6 +504,10 @@ sequenceDiagram
 **Implementation notes**
 
 * `app/api/tasks/[id]/status/route.ts`.
+* `lib/access.ts#canChangeTaskStatus` — the task must not be completed, and the
+  caller must be an assignee, the creator, a manager-chain ancestor, or hold
+  Admin, Head Office or Project Manager on the task. A site-manager peer who can
+  see the task is refused here.
 * `lib/transitions.ts` — `TODO → IN_PROGRESS|BLOCKED|COMPLETED`,
   `IN_PROGRESS → BLOCKED|COMPLETED|TODO`, `BLOCKED → IN_PROGRESS|TODO|COMPLETED`,
   `COMPLETED → []`. A no-op transition (`from === to`) is allowed.
@@ -407,12 +518,12 @@ sequenceDiagram
 
 ---
 
-## 7. Reopen request, approval and cancellation
+## 8. Reopen request, approval and cancellation
 
 Completed tasks are locked. Project and site managers request a reopen; Admin
 and Head Office can reopen directly or decide on a request.
 
-### 7.1 Request or direct reopen
+### 8.1 Request or direct reopen
 
 ```mermaid
 sequenceDiagram
@@ -465,7 +576,7 @@ sequenceDiagram
   most one pending request per task; the route also checks explicitly to return
   a clean `409`.
 
-### 7.2 Approve or reject
+### 8.2 Approve or reject
 
 ```mermaid
 sequenceDiagram
@@ -504,7 +615,7 @@ sequenceDiagram
   `completedById`. Rejection leaves the task `COMPLETED`.
 * The activity text is `reason` or `reason — note`.
 
-### 7.3 Cancel a pending request
+### 8.3 Cancel a pending request
 
 ```mermaid
 sequenceDiagram
@@ -533,7 +644,7 @@ sequenceDiagram
 
 ---
 
-## 8. Attachment upload and download
+## 9. Attachment upload and download
 
 **When:** a user attaches a photo or PDF to a task or a comment.
 
@@ -595,7 +706,7 @@ sequenceDiagram
 
 ---
 
-## 9. Master-data update and audit
+## 10. Master-data update and audit
 
 **When:** an Admin or Head Office member edits a company, project, plaza, user,
 category, membership or assignment.
@@ -652,7 +763,7 @@ sequenceDiagram
 
 ---
 
-## 10. Plaza access update and audit
+## 11. Plaza access update and audit
 
 **When:** an Admin/Head Office member replaces a user's plaza roles on the
 Access screen.
@@ -702,7 +813,7 @@ sequenceDiagram
 
 ---
 
-## 11. Comment with an attachment
+## 12. Comment with an attachment
 
 **When:** a user posts a comment, optionally with photos already uploaded.
 

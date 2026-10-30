@@ -28,6 +28,12 @@ plaza, task, user, department and audit row. One of the four derived roles.
 Architecture Decision Record. A short, numbered note explaining a decision and
 its consequences. See [`DECISIONS.md`](./DECISIONS.md).
 
+**Assignee**
+A user attached to a task through `TaskAssignee`. A task may have none, one or
+many assignees (at most 20), and all of them have the same rights: the task is on
+their board and any of them may change its status, comment or upload. See
+*Task assignee*.
+
 **Assignment ceiling**
 The rule set in `canAssignTo` that decides who may assign whom, at which scope.
 Admins and Head Office may assign any active user; project and site managers have
@@ -79,6 +85,12 @@ The role shown in the header: `ADMIN`, `HEAD_OFFICE` or `PROJECT_MANAGER`.
 Derived from `isAdmin` and Head Office memberships, not stored. Site managers
 display as `PROJECT_MANAGER`; the badge shows their plaza job titles instead.
 
+**Downline**
+Everyone below a person in the reporting line, at any depth. Computed by
+`lib/access.ts#descendantUserIds` with a recursive, cycle-safe CTE. Tasks assigned
+to or created by the downline are visible to the manager even without a project
+or plaza grant. See *Reporting line*.
+
 ---
 
 ## E
@@ -125,6 +137,12 @@ authorisation still re-reads the database on every request.
 ---
 
 ## M
+
+**Manager above**
+A person on the reporting chain above a task's assignees or creator, and not an
+assignee or creator themselves. When the chain is their only link to the task
+(no project or plaza grant), they hold no scope role: they may view, comment and
+change the status, but not edit or reassign. See *Downline*.
 
 **Master data**
 Reference and configuration rows: companies, projects, plazas, departments,
@@ -190,8 +208,8 @@ the assignee override.
 
 **Project Manager (PM)**
 A user with a `ProjectAssignment` on a project. Sees every task in that project,
-including all plaza tasks, and may create tasks at project or plaza level. Also a
-display role label.
+including all plaza tasks, plus tasks assigned to or created by their downline,
+and may create tasks at project or plaza level. Also a display role label.
 
 **ProjectAssignment**
 Join row between `User` and `Project`, with `isPrimary` and `assignedById`.
@@ -200,6 +218,12 @@ Grants project-manager access.
 ---
 
 ## R
+
+**Reporting line**
+The chain formed by `User.managerId`, a nullable self-FK to `User`. It is not an
+access grant: it supplies downline visibility and the manager status override,
+and the API rejects self-management and cycles with `422` (see
+`lib/reporting.ts`).
 
 **Reopen request**
 A `TaskReopenRequest` asking to move a `COMPLETED` task back to `IN_PROGRESS`.
@@ -235,7 +259,8 @@ The server-side identity object from `getSessionUser`: `id`, `role`, `isAdmin`,
 
 **Site Manager**
 A user holding a `PlazaAssignment`. Sees tasks on their plazas plus tasks
-assigned to them; may create tasks only on their own plazas. Displays as
+assigned to or created by them, and tasks assigned to or created by their
+downline; may create tasks only on their own plazas. Displays as
 `PROJECT_MANAGER` with a plaza job title.
 
 **Slug id**
@@ -251,9 +276,14 @@ stay reserved. Users are deactivated rather than archived.
 ## T
 
 **Task**
-The unit of work. One assignee, one scope, one status, optional category and due
-date. Tasks are never deleted; they are completed and reopened through the
-request workflow.
+The unit of work. Any number of assignees (at most 20), one scope, one status,
+optional category and due date. Tasks are never deleted; they are completed and
+reopened through the request workflow.
+
+**Task assignee**
+The `TaskAssignee` join row — `taskId`, `userId`, `assignedById` and
+`assignedAt` — that makes a user an assignee of a task. API payloads flatten it to
+`assignees: [{ id, name, assignedAt }]`. See *Assignee*.
 
 **TaskActivity**
 Append-only task history: `CREATED`, `COMMENT`, `ASSIGNED`, `STATUS_CHANGED`,
@@ -293,7 +323,7 @@ badge.
 | API | Application Programming Interface | JSON routes under `app/api` |
 | CHECK | SQL check constraint | e.g. `Task_scope_kind_check` |
 | ERD | Entity–Relationship Diagram | [`ERD.md`](./ERD.md) |
-| FK | Foreign key | 27 relationships; see [`ERD.md`](./ERD.md) |
+| FK | Foreign key | 30 relationships; see [`ERD.md`](./ERD.md) |
 | HO | Head Office | Global role |
 | IST | Indian Standard Time | `Asia/Kolkata`, UTC+05:30 |
 | JWT | JSON Web Token | Auth.js session cookie |

@@ -39,7 +39,7 @@ except `/api/auth/*` and `/api/health` requires an authenticated session cookie.
 | `409` | Conflict: duplicate name/code, pending reopen already exists, request no longer pending |
 | `413` | Attachment larger than 10 MB |
 | `415` | Attachment MIME type not allowed |
-| `422` | Semantically invalid: illegal transition, inactive category/department, plaza/project mismatch, assignee outside ceiling |
+| `422` | Semantically invalid: illegal transition, inactive category/department, plaza/project mismatch, any assignee outside the ceiling, reporting-line self/cycle |
 | `423` | Locked: task is completed |
 
 `requireProjectAccess`, `requirePlazaAccess` and `requireTaskAccess` throw a
@@ -62,9 +62,9 @@ surface as `403` or `404` depending on the helper.
 | Method | Path | Who | Purpose |
 |---|---|---|---|
 | `GET` | `/api/users/me` | Any session | Current identity and display role |
-| `GET` | `/api/users` | Admin, HO | User directory with assignment ids and derived role |
-| `POST` | `/api/users` | Admin | Create a user |
-| `PATCH` | `/api/users/:id` | Admin | Update profile, admin flag, active flag, password |
+| `GET` | `/api/users` | Admin, HO | User directory with assignment ids, reporting line (`managerId`, `managerName`) and derived role |
+| `POST` | `/api/users` | Admin | Create a user, optionally with a `managerId` |
+| `PATCH` | `/api/users/:id` | Admin | Update profile, admin flag, active flag, password, reporting line |
 
 ### Dashboard and history
 
@@ -106,10 +106,10 @@ surface as `403` or `404` depending on the helper.
 |---|---|---|---|
 | `GET` | `/api/tasks` | Any session | Scoped, filtered, paginated task list |
 | `POST` | `/api/tasks` | Depends on scope | Create one task or a batch |
-| `GET` | `/api/tasks/:id` | Anyone with task access | Task detail, feed, permissions, assignees, pending reopen |
+| `GET` | `/api/tasks/:id` | Anyone with task access | Task detail with `assignees`, feed, permissions, `assigneeCandidates`, pending reopen |
 | `PATCH` | `/api/tasks/:id` | Creator, PM, HO, Admin | Edit title, description, priority, category, due date |
-| `POST` | `/api/tasks/:id/assign` | Depends on scope | Change or clear the assignee |
-| `POST` | `/api/tasks/:id/status` | Anyone with task access | Change status |
+| `POST` | `/api/tasks/:id/assign` | Anyone with an assignable scope role | Replace the assignee set |
+| `POST` | `/api/tasks/:id/status` | Assignee, creator, manager above, PM, HO, Admin | Change status |
 | `POST` | `/api/tasks/:id/comments` | Anyone with task access | Append a comment |
 | `GET` | `/api/tasks/:id/attachments` | Anyone with task access | List attachments |
 | `POST` | `/api/tasks/:id/attachments` | Anyone with task access | Upload an attachment |
@@ -199,9 +199,15 @@ inactive or missing.
   "officeName": "Delhi",
   "projectIds": ["proj_x"],
   "plazaIds": ["plaza_y"],
-  "plazaRoles": [{ "plazaId": "plaza_y", "role": "TOLL" }]
+  "plazaRoles": [{ "plazaId": "plaza_y", "role": "TOLL" }],
+  "managerId": "user_manager",
+  "managerName": "Ravi Shah"
 }
 ```
+
+`managerId` / `managerName` describe the reporting line and are `null` when the
+person reports to nobody. The reporting line is not an access grant: it adds no
+project or plaza scope (see [`ACCESS-CONTROL.md`](./ACCESS-CONTROL.md#2-visibility)).
 
 **`POST /api/users`** — Admin only.
 
@@ -212,20 +218,31 @@ inactive or missing.
   "phone": "+91...",
   "title": "Toll Manager",
   "password": "min-6-chars",
-  "isAdmin": false
+  "isAdmin": false,
+  "managerId": "user_manager"
 }
 ```
 
 `201` → created user (without `passwordHash`) plus `role` (`ADMIN` or
 `PROJECT_MANAGER`; add a Head Office membership separately).
-`409` when the email is already used. Writes `AuditLog` `User/CREATE`.
+`409` when the email is already used. `422` when `managerId` names a missing or
+inactive user. Writes `AuditLog` `User/CREATE` with `managerId` in the snapshot.
 
 **`PATCH /api/users/:id`** — Admin only.
 
-Any of `{ name?, phone?, title?, isAdmin?, active?, password? }`.
-`200` → updated user. `404` if missing. `active: false` writes action
-`ARCHIVE`; a password change is recorded as `passwordChanged: true` (never the
-hash).
+Any of `{ name?, phone?, title?, isAdmin?, active?, password?, managerId? }`.
+`managerId` accepts an id or `null` (clear the link). `200` → updated user.
+`404` if missing. `422` when the link would make the person their own manager or
+close a cycle, or when the manager is missing/inactive; the body is
+`{ "error": "A person cannot report to themselves" }`,
+`{ "error": "That reporting line would create a cycle" }`,
+`{ "error": "Manager not found" }` or `{ "error": "Manager is not active" }`.
+`active: false` writes action `ARCHIVE`; a password change is recorded as
+`passwordChanged: true` (never the hash).
+
+Changing `managerId` changes only the reporting line. Scope grants
+(`ProjectAssignment`, `PlazaAssignment`, `HeadOfficeMembership`) are separate
+endpoints and are untouched.
 
 ### 3.4 Dashboard
 
@@ -402,21 +419,26 @@ GET /api/tasks?plazaId=&projectId=&departmentId=&headOffice=true
 | `status` | One of the four statuses; ignored if invalid |
 | `priority` | One of the three priorities; ignored if invalid |
 | `categoryId` | Exact match |
-| `assigneeId` | Exact match; `me` resolves to the caller |
+| `assigneeId` | Matches **any** assignment on the task; `me` resolves to the caller |
 | `overdue=true` | `dueDate < today IST` and not `COMPLETED`; overrides `status` |
-| `q` | Case-insensitive `title` contains |
+| `q` | Case-insensitive `title` contains, or any assignee name contains |
 | `page` | ≥ 1, default 1 |
 | `pageSize` | 1–100, default 50 |
 
 `200` →
 
 ```json
-{ "items": [ ...task with project, plaza, category, department, assignee, createdBy, completedBy ],
+{ "items": [ ...task with project, plaza, category, department, assignees, createdBy, completedBy ],
   "total": 47, "page": 1, "pageSize": 50 }
 ```
 
+Each item carries `assignees: [{ id, name, assignedAt }]` ordered by
+`assignedAt asc`; there is no singular `assignee` field. Every assignee is equal:
+no primary, and `assigneeId` matches any of them.
+
 Ordered by `updatedAt desc`. All results are intersected with
-`taskScopeWhere(user)`.
+`taskScopeWhere(user)`, which includes tasks assigned to **or** created by
+anyone below the caller in the reporting line, at any depth.
 
 ### 3.11 Tasks — create
 
@@ -430,7 +452,7 @@ Ordered by `updatedAt desc`. All results are intersected with
   "title": "Repair boom barrier",
   "description": "Optional, ≤ 5000 chars",
   "priority": "MEDIUM",
-  "assigneeId": "user_z",
+  "assigneeIds": ["user_z", "user_w"],
   "dueDate": "2026-11-05",
   "categoryId": "cat_toll_operations"
 }
@@ -445,10 +467,15 @@ Rules:
 * An empty scope means Head Office level.
 * `departmentId` must reference an active department (`422` otherwise).
 * `categoryId` must reference an active category (`422` otherwise).
-* `assigneeId` must pass the assignment ceiling (`422` otherwise).
+* `assigneeIds` is an array capped at **20** entries, de-duplicated before use;
+  each person must pass the assignment ceiling (`422` otherwise). Omit it or send
+  `[]` to create an unassigned task.
+* `assigneeId` (singular, string) is a **deprecated alias** for a single
+  assignee, kept for one release. When both are sent, `assigneeIds` wins.
 
-`201` → created task with `taskInclude` relations. The transaction writes
-`CREATED` and, when assigned, `ASSIGNED` activity rows.
+`201` → created task with `taskInclude` relations, including
+`assignees: [{ id, name, assignedAt }]`. The transaction writes `CREATED` and
+one `ASSIGNED` activity row per assignee.
 
 **Batch**
 
@@ -462,13 +489,15 @@ Rules:
   "title": "Quarterly safety walkthrough",
   "description": "...",
   "priority": "LOW",
-  "assigneeId": "user_z",
+  "assigneeIds": ["user_z"],
   "dueDate": "2026-11-30",
   "categoryId": "cat_safety"
 }
 ```
 
-`scopes` is 1–50, duplicates are rejected. `201` → `{ "items": [...], "count": n }`.
+`scopes` is 1–50, duplicates are rejected. `assigneeIds` follows the same rules
+as the single-task body (max 20, de-duplicated, `assigneeId` deprecated alias)
+and is applied to every created task. `201` → `{ "items": [...], "count": n }`.
 Every scope is resolved and authorised before the transaction, so one failure
 returns its error and writes nothing.
 
@@ -482,7 +511,7 @@ GET /api/tasks/:id
 
 ```json
 {
-  "task": { "...": "task with taskDetailInclude (activities, attachments, reopenRequests)" },
+  "task": { "...": "task with taskDetailInclude (assignees, activities, attachments, reopenRequests)" },
   "events": [ "...same activity rows, ascending" ],
   "permissions": {
     "canEdit": true,
@@ -495,10 +524,16 @@ GET /api/tasks/:id
     "canUpload": true,
     "canAdminDelete": false
   },
-  "assignees": [ "...only when canAssign, else []" ],
+  "assigneeCandidates": [ "...picker rows; [] when canAssign is false" ],
   "reopenRequest": { "...pending request or null" }
 }
 ```
+
+`task.assignees` is the current set: `[{ id, name, assignedAt }]`, ordered by
+`assignedAt asc`. `assigneeCandidates` is the eligible picker list for the
+task's scope — it is **not** the current assignee set, and it is `[]` unless
+`permissions.canAssign` is true. It was previously called `assignees` at the top
+level; that name now belongs to the task's assignee set.
 
 `401`/`403`/`404` from `requireTaskAccess`.
 
@@ -520,12 +555,33 @@ activity listing the changed fields.
 
 ```http
 POST /api/tasks/:id/assign
+{ "assigneeIds": ["user_z", "user_w"] }
+```
+
+Replace-set semantics: the array becomes the task's **entire** assignee set.
+Anyone omitted is removed, anyone new is added, and `[]` clears every assignee.
+The array is capped at **20** entries (`400` beyond that) and de-duplicated
+before use.
+
+The deprecated single-assignee form is still accepted for one release:
+
+```http
+POST /api/tasks/:id/assign
 { "assigneeId": "user_z" }
 ```
 
-`assigneeId` may be `null` to clear. Responses: `200` task with `assignee`;
-`400`; `401`; `403`; `404`; `422` outside the ceiling; `423` completed. Writes
-`ASSIGNED` with `fromAssigneeId` / `toAssigneeId`.
+`assigneeId` (`string | null`) is treated as a one-element set, and `null`
+clears the set. Sending neither `assigneeIds` nor `assigneeId` is `400`.
+
+Responses: `200` → the updated task including
+`assignees: [{ id, name, assignedAt }]`; `400`; `401`; `403` when the caller has
+no assignable scope role; `404`; `422` when any id is outside the ceiling;
+`423` when the task is completed.
+
+Each added or removed person writes one `ASSIGNED` activity row
+(`toAssigneeId` for an addition, `fromAssigneeId` for a removal). Unchanged
+assignees write nothing. `Task.updatedAt` is touched, so the task moves to the
+top of `updatedAt desc` lists.
 
 ### 3.15 Tasks — status
 
@@ -534,9 +590,12 @@ POST /api/tasks/:id/status
 { "to": "IN_PROGRESS", "text": "Optional note" }
 ```
 
-`200` → task. `400`; `401`; `403`; `404`; `422` completed or illegal
-transition. Completing sets `completedAt`/`completedById`; any other transition
-clears them. Writes `STATUS_CHANGED`.
+`200` → task. `400`; `401`; `403` when the caller may see the task but not move
+it; `404`; `422` completed or illegal transition. Only an assignee, the creator,
+a manager above them in the reporting line, or a Project Manager / Head Office /
+Admin may change status; a same-plaza peer with no ownership claim gets `403`.
+Completing sets `completedAt`/`completedById`; any other transition clears them.
+Writes `STATUS_CHANGED`.
 
 ### 3.16 Tasks — comments
 
@@ -715,9 +774,11 @@ assignments (or no access). Revoking a primary promotes the next membership.
 | User `name` | 2–100 |
 | User `email` | Valid email; stored lower-case |
 | User `phone` / `title` | ≤ 30 / ≤ 100 |
+| User `managerId` | Id or `null`; must exist, be active, and must not be the user or close a cycle (`422`) |
 | Password | ≥ 6 characters |
 | Task `title` | 3–200 |
 | Task `description` | ≤ 5000 |
+| Task `assigneeIds` | ≤ 20 entries, de-duplicated (`assigneeId` deprecated alias) |
 | Task `priority` | `LOW`, `MEDIUM`, `HIGH` (default `MEDIUM`) |
 | `dueDate` | `YYYY-MM-DD` |
 | Batch `scopes` | 1–50, no duplicate scope key |
@@ -784,7 +845,7 @@ The following do **not** exist. Do not design around them.
 | Public API / API keys | Every route except `/api/auth/*` and `/api/health` needs a session cookie. |
 | Pagination on master data | Projects, plazas, companies, users, categories and departments return full lists. |
 | Sorting controls | `/api/tasks` is fixed to `updatedAt desc`; other lists have fixed orders. |
-| Full-text search | `q` matches task titles only. |
+| Full-text search | `q` matches task titles and assignee names only. |
 | Bulk user import | Users are created one at a time through `POST /api/users` or the seed. |
 | File replacement | An attachment is uploaded or deleted; there is no replace endpoint. |
 | Email/notification endpoints | None. |

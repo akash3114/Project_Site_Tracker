@@ -30,6 +30,8 @@ and migrations rather than from a written decision note.
 | [ADR-013](#adr-013-local-filesystem-attachment-storage) | Local filesystem attachment storage | Accepted (inferred) |
 | [ADR-014](#adr-014-reopen-request-workflow) | Reopen request workflow for completed tasks | Accepted |
 | [ADR-015](#adr-015-batch-task-creation-across-scopes) | Batch task creation across scopes | Accepted |
+| [ADR-016](#adr-016-multi-assignee-tasks) | Multi-assignee tasks | Accepted |
+| [ADR-017](#adr-017-reporting-hierarchy) | Reporting hierarchy | Accepted |
 
 ---
 
@@ -568,3 +570,107 @@ keys are rejected.
 
 * **Client-side loop** — many requests, partial success, harder to reason about.
 * **Recurring task templates** — more powerful, out of scope for the pilot.
+
+---
+
+## ADR-016: Multi-assignee tasks
+
+**Status:** Accepted
+**Date:** 2026-10-29
+
+### Context
+
+A task often has more than one owner: a toll manager and a maintenance manager
+share a plaza repair, or two site managers cover each other's shifts. A single
+`Task.assigneeId` forced an arbitrary owner, hid the task from the other
+person's board, and made "who may change the status" depend on who happened to
+be picked first.
+
+### Decision
+
+Model assignees as a join table, `TaskAssignee`, with a composite primary key
+`(taskId, userId)` plus `assignedById` and `assignedAt`. Every assignee has the
+same rights: the task appears on each person's board and any assignee may
+comment, change status, upload and request a reopen.
+
+`POST /api/tasks/:id/assign` replaces the whole set with
+`{ assigneeIds: string[] }`. An empty array clears every assignee. Ids are
+de-duplicated and capped at 20 (`MAX_TASK_ASSIGNEES`), and each person added or
+removed gets their own `ASSIGNED` activity row. Task creation still accepts the
+deprecated single `assigneeId` for one release; the assign endpoint takes
+`assigneeIds` only.
+
+`20261029000003_task_assignees_and_reporting` creates the table, backfills the
+old `Task.assigneeId` values, then drops that column and its index.
+
+### Consequences
+
+* Shared ownership is represented directly; there is no "primary owner".
+* Every task read and filter joins `TaskAssignee`; `Task.assigneeId` no longer
+  exists, so raw SQL and reports must be updated.
+* The API is replace-set, not a patch: a client that sends a partial list will
+  remove the people it omitted.
+* Completed tasks still lock reassignment (`423`).
+* Two assignees mean two activity rows per change and two people who can move
+  the status; the last write wins.
+* Assignment changes touch `Task.updatedAt` so "recently updated" lists stay
+  accurate.
+
+### Alternatives
+
+* **`assigneeIds String[]` on `Task`** — compact, but no foreign key, no
+  per-assignee metadata and painful joins.
+* **One assignee plus a "primary" flag on the join row** — adds a rule with no
+  business meaning and invites disputes about who is primary.
+* **One task per person** — duplicates the history and the comments.
+
+---
+
+## ADR-017: Reporting hierarchy
+
+**Status:** Accepted
+**Date:** 2026-10-29
+
+### Context
+
+Scope grants answer "where does this person work", not "who supervises whom". A
+project manager or Head Office lead may need to see and unblock a subordinate's
+task without holding a `PlazaAssignment` on every plaza the subordinate touches.
+Encoding the chain as extra scope grants would blur the permission model and
+leave stale grants behind when people move.
+
+### Decision
+
+Store the reporting line as `User.managerId`, a nullable self-FK with
+`ON DELETE SET NULL`. Admin edits it in Admin → Users → "Reports to"
+(`PATCH /api/users/:id { managerId }`). `lib/reporting.ts` rejects
+self-management, a missing or inactive manager, and any link that would create a
+cycle (`422`).
+
+`lib/access.ts` walks the chain. A manager sees tasks assigned to or created by
+anyone below them, at any depth, and may change their status, comment, upload and
+request a reopen. A manager-only observer has no scope role, so they cannot edit
+core fields or reassign. Changing a reporting link changes visibility and status
+rights only; it never creates or removes a `ProjectAssignment`,
+`PlazaAssignment` or `HeadOfficeMembership` row.
+
+### Consequences
+
+* Supervision works across projects without duplicating access grants.
+* A reporting change applies on the next request; no new session is needed.
+* Recursive queries (`descendantUserIds`, `managerAncestorIds`) run on list and
+  detail paths. Depth is small, but the queries are not free.
+* A bad link can hide work; cycle rejection keeps the recursive walks finite.
+* The chain is HR data, not an audit trail. Previous managers survive only in
+  `AuditLog` update snapshots.
+* Manager-only rights are deliberately narrower than a project manager's. A
+  manager who also needs to edit must hold the scope grant.
+
+### Alternatives
+
+* **Encode the chain in scope grants** — duplicates rows, goes stale and
+  conflates "where" with "who reports to whom".
+* **Materialized path or closure table** — faster ancestor queries, more write
+  complexity than the pilot needs.
+* **Department-based supervision only** — fails across project companies and
+  field staff who share a department.

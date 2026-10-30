@@ -2,6 +2,12 @@
 
 Status: **in progress**
 Branch: `feat/ho-department-task-scope`
+
+> Historical design note. It predates multi-assignee tasks and the reporting
+> line, so statements such as "one assignee per task" describe the state at the
+> time of writing. Current behaviour is in
+> [`ACCESS-CONTROL.md`](./ACCESS-CONTROL.md) and [`API.md`](./API.md).
+
 Supersedes the "Task scope: unchanged" decision in
 `docs/head-office-departments-plan.md` §2. Departments are still organisational
 metadata for **access**; they become a **task location** only.
