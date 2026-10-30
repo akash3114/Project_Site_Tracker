@@ -1,3 +1,6 @@
+import "dotenv/config";
+
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 /**
@@ -10,7 +13,11 @@ import { PrismaClient } from "@prisma/client";
  */
 
 const BASE = process.env.SMOKE_BASE_URL ?? "http://localhost:3000";
-const db = new PrismaClient();
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error("DATABASE_URL is not set");
+
+const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 const results = [];
 function check(name, ok, detail = "") {
@@ -848,6 +855,9 @@ async function main() {
       // the reporting line, must see and act on it without gaining edit rights.
       const seniorAssignment = await db.plazaAssignment.findFirst({
         where: {
+          // Must not be the junior themselves: they also hold a plaza row
+          // elsewhere, and self-management is (correctly) rejected.
+          userId: { not: site.userId },
           plazaId: { not: site.plaza.id },
           user: {
             isAdmin: false,

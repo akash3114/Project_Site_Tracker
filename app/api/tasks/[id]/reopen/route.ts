@@ -13,15 +13,16 @@ import { reopenDecisionSchema, reopenRequestSchema } from "@/lib/validations";
 /** GET /api/tasks/:id/reopen → the pending reopen request, if any. */
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    await requireTaskAccess(user, params.id);
+    await requireTaskAccess(user, id);
     const request = await db.taskReopenRequest.findFirst({
-      where: { taskId: params.id, status: "PENDING" },
+      where: { taskId: id, status: "PENDING" },
       include: {
         requestedBy: { select: { id: true, name: true } },
         reviewedBy: { select: { id: true, name: true } },
@@ -42,14 +43,15 @@ export async function GET(
  */
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body: unknown = await req.json().catch(() => null);
-    const access = await requireTaskAccess(user, params.id);
+    const access = await requireTaskAccess(user, id);
 
     const isDecision =
       body !== null &&
@@ -71,7 +73,7 @@ export async function POST(
       const request = await db.taskReopenRequest.findUnique({
         where: { id: parsed.data.requestId },
       });
-      if (!request || request.taskId !== params.id) {
+      if (!request || request.taskId !== id) {
         return NextResponse.json({ error: "Request not found" }, { status: 404 });
       }
       if (request.status !== "PENDING") {
@@ -99,7 +101,7 @@ export async function POST(
 
         if (approve) {
           await tx.task.update({
-            where: { id: params.id },
+            where: { id },
             data: {
               status: "IN_PROGRESS",
               completedAt: null,
@@ -110,7 +112,7 @@ export async function POST(
 
         await tx.taskActivity.create({
           data: {
-            taskId: params.id,
+            taskId: id,
             actorId: user.id,
             type: approve ? "REOPEN_APPROVED" : "REOPEN_REJECTED",
             fromStatus: "COMPLETED",
@@ -142,7 +144,7 @@ export async function POST(
     }
 
     const pending = await db.taskReopenRequest.findFirst({
-      where: { taskId: params.id, status: "PENDING" },
+      where: { taskId: id, status: "PENDING" },
       select: { id: true },
     });
     if (pending) {
@@ -155,7 +157,7 @@ export async function POST(
     if (canReopenDirectly(access.role)) {
       const updated = await db.$transaction(async (tx) => {
         await tx.taskReopenRequest.updateMany({
-          where: { taskId: params.id, status: "PENDING" },
+          where: { taskId: id, status: "PENDING" },
           data: {
             status: "APPROVED",
             reviewedById: user.id,
@@ -164,7 +166,7 @@ export async function POST(
           },
         });
         const task = await tx.task.update({
-          where: { id: params.id },
+          where: { id },
           data: {
             status: "IN_PROGRESS",
             completedAt: null,
@@ -173,7 +175,7 @@ export async function POST(
         });
         await tx.taskActivity.create({
           data: {
-            taskId: params.id,
+            taskId: id,
             actorId: user.id,
             type: "REOPENED",
             fromStatus: "COMPLETED",
@@ -193,7 +195,7 @@ export async function POST(
     const request = await db.$transaction(async (tx) => {
       const created = await tx.taskReopenRequest.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           requestedById: user.id,
           reason: parsed.data.reason,
           status: "PENDING",
@@ -205,7 +207,7 @@ export async function POST(
       });
       await tx.taskActivity.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           actorId: user.id,
           type: "REOPEN_REQUESTED",
           fromStatus: "COMPLETED",
@@ -226,8 +228,9 @@ export async function POST(
 /** DELETE /api/tasks/:id/reopen?requestId= → requester cancels a pending request. */
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -238,11 +241,11 @@ export async function DELETE(
       return NextResponse.json({ error: "requestId is required" }, { status: 400 });
     }
 
-    await requireTaskAccess(user, params.id);
+    await requireTaskAccess(user, id);
     const request = await db.taskReopenRequest.findUnique({
       where: { id: requestId },
     });
-    if (!request || request.taskId !== params.id) {
+    if (!request || request.taskId !== id) {
       return NextResponse.json({ error: "Request not found" }, { status: 404 });
     }
     if (request.status !== "PENDING") {
@@ -262,7 +265,7 @@ export async function DELETE(
       });
       await tx.taskActivity.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           actorId: user.id,
           type: "REOPEN_CANCELLED",
           fromStatus: "COMPLETED",

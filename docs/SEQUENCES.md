@@ -84,7 +84,7 @@ sequenceDiagram
 sequenceDiagram
   autonumber
   participant B as Browser
-  participant M as middleware.ts
+  participant M as proxy.ts
   participant L as app/(app)/layout.tsx
   participant A as getSessionUser
   participant D as PostgreSQL
@@ -112,7 +112,7 @@ sequenceDiagram
 
 **Implementation notes**
 
-* `middleware.ts` — `auth()` from the edge-safe config. Public paths: `/login`,
+* `proxy.ts` — `auth()` from the edge-safe config. Public paths: `/login`,
   `api/auth`, `api/health`, `_next`, `favicon`. API requests get
   `{"error":"Unauthorized"}` with `401`; pages get a redirect.
 * `app/(app)/layout.tsx` — calls `getSessionUser()` and redirects when null;

@@ -126,7 +126,7 @@ the same information; the diagrams are a reading aid, not the only source.
   migrations. `DATABASE.md` and `ERD.md` describe the intent; `SCHEMA.md` mirrors
   the columns. If they disagree, the database wins and the docs need a fix.
 - **Source of truth for behaviour** is the code under `app/`, `lib/` and
-  `middleware.ts`. API and access docs are checked against the route handlers.
+  `proxy.ts`. API and access docs are checked against the route handlers.
 - **Dates** are stored as `timestamptz(3)` (instants) or `date` (calendar days).
   User-facing day boundaries use `Asia/Kolkata` via `lib/dates.ts`.
 - **Ids** are opaque strings: generated rows use `cuid()`, catalogue rows use

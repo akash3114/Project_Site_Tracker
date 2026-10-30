@@ -14,15 +14,16 @@ import { updateTaskSchema } from "@/lib/validations";
 /** GET /api/tasks/:id → full detail, activity feed, permissions, assignees. */
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const access = await requireTaskAccess(user, params.id);
+    const access = await requireTaskAccess(user, id);
     const task = await db.task.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: taskDetailInclude,
     });
     if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -64,8 +65,9 @@ export async function GET(
 /** PATCH /api/tasks/:id → core field edits. */
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -79,7 +81,7 @@ export async function PATCH(
       );
     }
 
-    const access = await requireTaskAccess(user, params.id);
+    const access = await requireTaskAccess(user, id);
     if (access.task.status === "COMPLETED") {
       return NextResponse.json(
         { error: "Task is completed. Reopen it before editing." },
@@ -117,7 +119,7 @@ export async function PATCH(
 
     const updated = await db.$transaction(async (tx) => {
       const next = await tx.task.update({
-        where: { id: params.id },
+        where: { id },
         data: {
           ...(title !== undefined ? { title } : {}),
           ...(description !== undefined
@@ -138,7 +140,7 @@ export async function PATCH(
       });
       await tx.taskActivity.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           actorId: user.id,
           type: "UPDATED",
           fromStatus: access.task.status,

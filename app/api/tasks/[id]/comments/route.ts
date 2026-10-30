@@ -7,8 +7,9 @@ import { commentSchema } from "@/lib/validations";
 /** POST /api/tasks/:id/comments → append a comment (allowed when completed). */
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,12 +23,12 @@ export async function POST(
       );
     }
 
-    await requireTaskAccess(user, params.id);
+    await requireTaskAccess(user, id);
 
     const attachmentIds = parsed.data.attachmentIds ?? [];
     if (attachmentIds.length > 0) {
       const attachments = await db.taskAttachment.findMany({
-        where: { id: { in: attachmentIds }, taskId: params.id },
+        where: { id: { in: attachmentIds }, taskId: id },
         select: { id: true, activityId: true },
       });
       if (
@@ -44,7 +45,7 @@ export async function POST(
     const event = await db.$transaction(async (tx) => {
       const comment = await tx.taskActivity.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           actorId: user.id,
           type: "COMMENT",
           text: parsed.data.text,
@@ -52,7 +53,7 @@ export async function POST(
       });
       if (attachmentIds.length > 0) {
         await tx.taskAttachment.updateMany({
-          where: { id: { in: attachmentIds }, taskId: params.id },
+          where: { id: { in: attachmentIds }, taskId: id },
           data: { activityId: comment.id },
         });
       }

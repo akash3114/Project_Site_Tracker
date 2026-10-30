@@ -27,13 +27,14 @@ function StatusDonut({ counts }: { counts: Record<MgmtStatus, number> }) {
   const total = STATUS_ORDER.reduce((sum, status) => sum + counts[status], 0);
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
-  let offset = 0;
-  const segments = STATUS_ORDER.map((status) => {
-    const length = total ? (counts[status] / total) * circumference : 0;
-    const segment = { status, length, offset };
-    offset += length;
-    return segment;
-  });
+  const lengths = STATUS_ORDER.map((status) =>
+    total ? (counts[status] / total) * circumference : 0,
+  );
+  const segments = STATUS_ORDER.map((status, index) => ({
+    status,
+    length: lengths[index],
+    offset: lengths.slice(0, index).reduce((sum, value) => sum + value, 0),
+  }));
   const description = STATUS_ORDER.map(
     (status) => `${STATUS_LABELS[status]} ${counts[status]}`,
   ).join(", ");

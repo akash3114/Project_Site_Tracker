@@ -1,3 +1,6 @@
+import "dotenv/config";
+
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
@@ -7,7 +10,10 @@ import {
   MASTER_OFFICES,
 } from "./master-data";
 
-const db = new PrismaClient();
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error("DATABASE_URL is not set");
+
+const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 const hashPw = (s: string) => bcrypt.hash(s, 12);
 
@@ -238,7 +244,7 @@ async function main(): Promise<void> {
   // exists. SEED_RESET=1 above is the explicit wipe-and-rebuild path.
   const seededBefore = (await db.user.count()) > 0;
   if (seededBefore && process.env.SEED_RESET !== "1") {
-    // eslint-disable-next-line no-console
+     
     console.log(
       "Seed skipped: database already contains users. Set SEED_RESET=1 to wipe and re-seed.",
     );
@@ -837,7 +843,7 @@ async function main(): Promise<void> {
     db.taskAssignee.count(),
   ]);
 
-  // eslint-disable-next-line no-console
+   
   console.log(
     JSON.stringify({
       companies,
@@ -862,7 +868,7 @@ async function main(): Promise<void> {
 
 main()
   .catch((e) => {
-    // eslint-disable-next-line no-console
+     
     console.error(e);
     process.exit(1);
   })

@@ -11,17 +11,18 @@ import { db } from "@/lib/db";
 import { projectStats } from "@/lib/stats";
 import { updateProjectSchema } from "@/lib/validations";
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /** GET /api/projects/:id → scoped detail with stats. */
 export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await requireProjectAccess(user, params.id);
+  await requireProjectAccess(user, id);
 
   const project = await db.project.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       company: { select: { id: true, name: true, code: true } },
       _count: { select: { plazas: true } },
@@ -57,6 +58,7 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
 
 /** PATCH /api/projects/:id → Admin / Head Office. */
 export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!canManageProjects(user)) {
@@ -72,7 +74,7 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
     );
   }
 
-  const project = await db.project.findUnique({ where: { id: params.id } });
+  const project = await db.project.findUnique({ where: { id } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (parsed.data.companyId) {
@@ -87,7 +89,7 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
 
   const updated = await db.$transaction(async (tx) => {
     const next = await tx.project.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         ...(parsed.data.companyId !== undefined
           ? { companyId: parsed.data.companyId }

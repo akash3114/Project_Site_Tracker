@@ -21,7 +21,7 @@ Anything marked **Recommendation** is not implemented yet.
 
 ### Prerequisites
 
-* Node.js 20 and npm
+* Node.js 22 and npm (Prisma 7 requires Node 20.19+, 22.12+ or 24+)
 * Docker Engine + Compose plugin
 * PostgreSQL 16 (the dev container is the supported path)
 * For production: Ubuntu 22.04 LTS, 2 vCPU / 4 GB RAM minimum, DNS pointing at
@@ -112,6 +112,10 @@ reporting-line visibility and cycle rejection, and attachment round-trips.
 
 Migrations are **forward-only**. Applied migrations must never be edited: Prisma
 records a checksum and `migrate deploy` will refuse a modified history.
+
+Prisma 7 reads the connection URL from `prisma.config.ts`, not from
+`prisma/schema.prisma`; the app connects through the `@prisma/adapter-pg` driver
+adapter in `lib/db.ts`. Keep both in sync when the database moves.
 
 ```mermaid
 flowchart LR

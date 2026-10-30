@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { assigneeSummary } from "@/lib/assignee-summary";
@@ -292,13 +293,13 @@ function PlazaTasksInner({ plazaId }: { plazaId: string }) {
 
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
           <nav aria-label="Breadcrumb" className="font-mono text-xs text-[#66756D]">
-            <a href="/" className="hover:text-[#1C2824]">
+            <Link href="/" className="hover:text-[#1C2824]">
               Dashboard
-            </a>
+            </Link>
             {" / "}
-            <a href="/projects" className="hover:text-[#1C2824]">
+            <Link href="/projects" className="hover:text-[#1C2824]">
               Projects
-            </a>
+            </Link>
             {" / "}
             <span>{plaza?.project?.name ?? "…"}</span>
             {" / "}

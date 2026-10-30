@@ -28,14 +28,14 @@ model, and operators who need to know what a request touches.
 
 | Question | Answer |
 |---|---|
-| Application | Next.js 14.2 App Router, React 18, TypeScript |
+| Application | Next.js 16.4 App Router, React 19, TypeScript |
 | Rendering | React Server Components for pages; client components for interactive workspaces |
 | API style | Route handlers under `app/api/**` returning JSON |
-| Database | PostgreSQL 16 via Prisma 6.19 (`prisma/schema.prisma`) |
+| Database | PostgreSQL 16 via Prisma 7.10 (`prisma/schema.prisma` + `prisma.config.ts`) |
 | Authentication | Auth.js / NextAuth v5 beta, Credentials provider, JWT session |
 | Password storage | `bcryptjs`, cost factor 12 |
 | Authorisation | Derived from assignment rows and the reporting line; **no account role column** |
-| Session gate | Edge middleware (`middleware.ts`) decoding the JWT cookie |
+| Session gate | Edge proxy (`proxy.ts`) decoding the JWT cookie |
 | Per-request identity | `lib/access.ts#getSessionUser` re-reads the user from the DB |
 | File storage | Local filesystem (`UPLOAD_DIR`, default `<cwd>/uploads`) |
 | Deployment | Docker Compose: Postgres, one-shot migrate job, Next.js standalone, Caddy |
@@ -89,11 +89,11 @@ outside it is the attachment directory.
 ```mermaid
 flowchart TB
   subgraph Client["Client"]
-    B["Browser<br/>React 18 + Tailwind UI"]
+    B["Browser<br/>React 19 + Tailwind UI"]
   end
 
   subgraph Edge["Edge"]
-    MW["middleware.ts<br/>JWT session gate"]
+    MW["proxy.ts<br/>JWT session gate"]
   end
 
   subgraph Server["Next.js server (node)"]
@@ -127,7 +127,7 @@ flowchart TB
 
 **Boundaries that matter**
 
-* The middleware only proves that a valid session cookie exists. It does not
+* The proxy only proves that a valid session cookie exists. It does not
   query the database and does not know the user's assignments.
 * Every page and every route handler re-establishes identity through
   `getSessionUser()`. A deactivated user with a still-valid JWT is rejected at
@@ -232,7 +232,7 @@ bundle.
 sequenceDiagram
   autonumber
   participant B as Browser
-  participant M as Middleware
+  participant M as Proxy
   participant L as AppLayout
   participant A as access.ts
   participant D as PostgreSQL
@@ -257,7 +257,7 @@ sequenceDiagram
   end
 ```
 
-The app layout calls `getSessionUser()` again even though middleware already
+The app layout calls `getSessionUser()` again even though the proxy already
 saw a session. That second read is what makes deactivation and role changes take
 effect immediately.
 
@@ -267,7 +267,7 @@ effect immediately.
 sequenceDiagram
   autonumber
   participant C as Client component
-  participant M as Middleware
+  participant M as Proxy
   participant R as Route handler
   participant A as access.ts
   participant V as Zod
@@ -321,11 +321,11 @@ catch and return unchanged. That is why handlers have the recurring
 | Inactive users | `authorize` returns `null` when `active` is false |
 | Session | JWT strategy; token carries `id` and `isAdmin` |
 | Cookie | Auth.js session cookie, `HttpOnly`, `SameSite=Lax` by default |
-| Edge gate | `middleware.ts` calls `auth()` with the edge-safe config |
+| Edge gate | `proxy.ts` calls `auth()` with the edge-safe config |
 | Server identity | `getSessionUser()` re-reads `active`, `isAdmin`, memberships, office |
 
 `lib/auth.config.ts` is intentionally free of `db` and `bcryptjs` imports so the
-middleware bundle can run on the edge runtime. The Node-only pieces live in
+proxy bundle can run on the edge runtime. The Node-only pieces live in
 `lib/auth.ts`.
 
 **Why the JWT is not trusted for authorisation:** `isAdmin` in the token is a
@@ -523,8 +523,8 @@ Environment variables and the full runbook are in
 
 | Layer | Choice | Version | Why it is here |
 |---|---|---|---|
-| Framework | Next.js (App Router) | 14.2.35 | Server components, route handlers, standalone output |
-| UI runtime | React | 18 | Required by Next.js 14 |
+| Framework | Next.js (App Router) | 16.4.3 | Server components, route handlers, standalone output |
+| UI runtime | React | 19 | Required by Next.js 16 |
 | Language | TypeScript | 5.x | Type safety across Prisma and Zod |
 | Styling | Tailwind CSS + `tailwindcss-animate` | 3.x | Utility styling |
 | Primitives | Radix Slot, `class-variance-authority`, `clsx`, `tailwind-merge` | — | shadcn/ui-style component layer |

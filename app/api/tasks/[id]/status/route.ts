@@ -13,8 +13,9 @@ import { statusSchema } from "@/lib/validations";
 /** POST /api/tasks/:id/status → move status; COMPLETED locks further moves. */
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -29,7 +30,7 @@ export async function POST(
     }
     const { to, text } = parsed.data;
 
-    const access = await requireTaskAccess(user, params.id);
+    const access = await requireTaskAccess(user, id);
     if (access.task.status === "COMPLETED") {
       return NextResponse.json(
         { error: "Task is completed. Request or approve a reopen first." },
@@ -48,7 +49,7 @@ export async function POST(
 
     const updated = await db.$transaction(async (tx) => {
       const next = await tx.task.update({
-        where: { id: params.id },
+        where: { id },
         data: {
           status: to,
           ...(to === "COMPLETED"
@@ -59,7 +60,7 @@ export async function POST(
       });
       await tx.taskActivity.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           actorId: user.id,
           type: "STATUS_CHANGED",
           fromStatus: access.task.status,

@@ -18,8 +18,9 @@ import { assignSchema } from "@/lib/validations";
  */
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -34,7 +35,7 @@ export async function POST(
     }
     const { assigneeIds } = parsed.data;
 
-    const access = await requireTaskAccess(user, params.id);
+    const access = await requireTaskAccess(user, id);
     if (access.task.status === "COMPLETED") {
       return NextResponse.json(
         { error: "Task is completed. Reopen it before reassigning." },
@@ -64,7 +65,7 @@ export async function POST(
 
     const updated = await db.$transaction(async (tx) => {
       const current = await tx.taskAssignee.findMany({
-        where: { taskId: params.id },
+        where: { taskId: id },
         select: { userId: true },
       });
       const before = new Set(current.map((row) => row.userId));
@@ -75,13 +76,13 @@ export async function POST(
 
       if (removed.length > 0) {
         await tx.taskAssignee.deleteMany({
-          where: { taskId: params.id, userId: { in: removed } },
+          where: { taskId: id, userId: { in: removed } },
         });
       }
       if (added.length > 0) {
         await tx.taskAssignee.createMany({
           data: added.map((userId) => ({
-            taskId: params.id,
+            taskId: id,
             userId,
             assignedById: user.id,
           })),
@@ -90,7 +91,7 @@ export async function POST(
 
       // Touch the parent row so `updatedAt desc` lists stay accurate.
       const next = await tx.task.update({
-        where: { id: params.id },
+        where: { id },
         data: { updatedAt: new Date() },
         include: taskInclude,
       });
@@ -98,7 +99,7 @@ export async function POST(
       for (const userId of removed) {
         await tx.taskActivity.create({
           data: {
-            taskId: params.id,
+            taskId: id,
             actorId: user.id,
             type: "ASSIGNED",
             fromStatus: access.task.status,
@@ -110,7 +111,7 @@ export async function POST(
       for (const userId of added) {
         await tx.taskActivity.create({
           data: {
-            taskId: params.id,
+            taskId: id,
             actorId: user.id,
             type: "ASSIGNED",
             fromStatus: access.task.status,

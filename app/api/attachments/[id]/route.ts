@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 function uploadDir(): string {
   return process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
@@ -16,12 +16,13 @@ function uploadDir(): string {
 
 /** GET /api/attachments/:id → stream the stored file after a task access check. */
 export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const attachment = await db.taskAttachment.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
     if (!attachment) return NextResponse.json({ error: "Not found" }, { status: 404 });
     await requireTaskAccess(user, attachment.taskId);
@@ -43,12 +44,13 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
 
 /** DELETE /api/attachments/:id → uploader or Admin. */
 export async function DELETE(_req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const attachment = await db.taskAttachment.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
     if (!attachment) return NextResponse.json({ error: "Not found" }, { status: 404 });
     await requireTaskAccess(user, attachment.taskId);

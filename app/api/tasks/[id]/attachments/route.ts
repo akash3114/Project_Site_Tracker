@@ -27,15 +27,16 @@ function uploadDir(): string {
 /** GET /api/tasks/:id/attachments → files linked to this task. */
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    await requireTaskAccess(user, params.id);
+    await requireTaskAccess(user, id);
 
     const attachments = await db.taskAttachment.findMany({
-      where: { taskId: params.id },
+      where: { taskId: id },
       include: { uploadedBy: { select: { id: true, name: true } } },
       orderBy: { createdAt: "asc" },
     });
@@ -49,12 +50,13 @@ export async function GET(
 /** POST /api/tasks/:id/attachments → multipart upload (10 MB max). */
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
   try {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    await requireTaskAccess(user, params.id);
+    await requireTaskAccess(user, id);
 
     const form = await req.formData();
     const file = form.get("file");
@@ -79,7 +81,7 @@ export async function POST(
     const activityId = (form.get("activityId") as string | null) || null;
     if (activityId) {
       const activity = await db.taskActivity.findFirst({
-        where: { id: activityId, taskId: params.id },
+        where: { id: activityId, taskId: id },
         select: { id: true },
       });
       if (!activity) {
@@ -104,7 +106,7 @@ export async function POST(
       if (!feedActivityId && !silent) {
         const activity = await tx.taskActivity.create({
           data: {
-            taskId: params.id,
+            taskId: id,
             actorId: user.id,
             type: "ATTACHMENT",
             text: file.name,
@@ -115,7 +117,7 @@ export async function POST(
 
       return tx.taskAttachment.create({
         data: {
-          taskId: params.id,
+          taskId: id,
           activityId: feedActivityId,
           uploadedById: user.id,
           fileName: file.name,

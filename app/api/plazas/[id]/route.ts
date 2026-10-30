@@ -12,15 +12,16 @@ import { db } from "@/lib/db";
 import { plazaProgress } from "@/lib/progress";
 import { updatePlazaSchema } from "@/lib/validations";
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /** GET /api/plazas/:id → scoped detail with task stats. */
 export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const plaza = await db.plaza.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       project: {
         select: {
@@ -75,6 +76,7 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
 
 /** PATCH /api/plazas/:id → Admin / Head Office. */
 export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!canManageProjects(user)) {
@@ -90,12 +92,12 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
     );
   }
 
-  const plaza = await db.plaza.findUnique({ where: { id: params.id } });
+  const plaza = await db.plaza.findUnique({ where: { id } });
   if (!plaza) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const updated = await db.$transaction(async (tx) => {
     const next = await tx.plaza.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
         ...(parsed.data.lengthKm !== undefined

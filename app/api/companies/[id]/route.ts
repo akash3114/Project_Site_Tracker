@@ -5,9 +5,10 @@ import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { updateCompanySchema } from "@/lib/validations";
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!user.isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -21,12 +22,12 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
     );
   }
 
-  const exists = await db.company.findUnique({ where: { id: params.id } });
+  const exists = await db.company.findUnique({ where: { id } });
   if (!exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const updated = await db.$transaction(async (tx) => {
     const next = await tx.company.update({
-      where: { id: params.id },
+      where: { id },
       data: parsed.data,
     });
     await logAudit(tx, {

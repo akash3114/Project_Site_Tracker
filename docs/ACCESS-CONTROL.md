@@ -1,7 +1,7 @@
 # Access Control — Project Site Tracker
 
 Who can see and do what, and why. Everything here is derived from the code:
-`lib/access.ts`, `lib/task-data.ts`, `middleware.ts` and the route handlers.
+`lib/access.ts`, `lib/task-data.ts`, `proxy.ts` and the route handlers.
 
 * Endpoint contracts: [`API.md`](./API.md)
 * Request flows: [`SEQUENCES.md`](./SEQUENCES.md)

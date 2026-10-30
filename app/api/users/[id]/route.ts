@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { managerCycleError } from "@/lib/reporting";
 import { updateUserSchema } from "@/lib/validations";
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * PATCH /api/users/:id → Admin only.
@@ -15,11 +15,12 @@ type Ctx = { params: { id: string } };
  * Deactivation via { active: false } — users are NEVER deleted.
  */
 export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
+  const { id } = await params;
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!user.isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const target = await db.user.findUnique({ where: { id: params.id } });
+  const target = await db.user.findUnique({ where: { id } });
   if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body: unknown = await req.json().catch(() => null);
@@ -33,7 +34,7 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
 
   if (parsed.data.managerId !== undefined) {
     const cycleError = await managerCycleError(
-      params.id,
+      id,
       parsed.data.managerId,
     );
     if (cycleError) {
@@ -43,7 +44,7 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
 
   const updated = await db.$transaction(async (tx) => {
     const next = await tx.user.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
         ...(parsed.data.phone !== undefined
