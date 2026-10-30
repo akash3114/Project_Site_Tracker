@@ -1,8 +1,13 @@
 /**
  * Shared task-scope contract.
  *
- * A task belongs to exactly one scope: a project (optionally narrowed to one
- * of its plazas) or Head Office (optionally narrowed to one department).
+ * A task belongs to exactly one scope, recorded by `Task.scope`:
+ *   PROJECT      -> projectId set
+ *   PLAZA        -> projectId + plazaId set
+ *   DEPARTMENT   -> departmentId set
+ *   HEAD_OFFICE  -> no location columns
+ * A CHECK constraint in the migration enforces the column combinations.
+ *
  * These helpers are the single source of truth for turning a task row into a
  * scope, serialising scopes to the keys used by filters and the scope picker,
  * and deciding whether a task belongs to a given scope.
@@ -11,7 +16,7 @@
  * imported from client components, route handlers and seed-adjacent scripts.
  */
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma, TaskScopeKind } from "@prisma/client";
 
 /** A task's location. `departmentId: null` means Head Office level. */
 export type TaskScope =
@@ -25,8 +30,13 @@ export type ScopeRef =
   | { kind: "department"; id: string }
   | { kind: "head-office" };
 
-/** The three scope columns, as selected from `Task`. */
+/**
+ * The scope discriminator plus the three scope columns, as selected from
+ * `Task`. `scope` is optional so callers holding older payloads (or test
+ * fixtures) still type-check; it is inferred from the columns when absent.
+ */
 export type TaskScopeFields = {
+  scope?: TaskScopeKind | null;
   projectId: string | null;
   plazaId: string | null;
   departmentId: string | null;
@@ -74,22 +84,36 @@ export function parseScopeKey(key: string): ScopeRef | null {
   }
 }
 
-/**
- * The scope of a task row. Department scope wins because a department task
- * never has a project. A row with neither column set is Head Office level.
- */
+/** The discriminator for a row, falling back to the column shape. */
+function scopeKindOf(task: TaskScopeFields): TaskScopeKind {
+  if (task.scope) return task.scope;
+  if (task.departmentId !== null) return "DEPARTMENT";
+  if (task.projectId !== null) return task.plazaId !== null ? "PLAZA" : "PROJECT";
+  return "HEAD_OFFICE";
+}
+
+/** The scope of a task row. */
 export function taskScopeOf(task: TaskScopeFields): TaskScope | null {
-  if (task.departmentId !== null) {
-    return { kind: "department", departmentId: task.departmentId };
+  switch (scopeKindOf(task)) {
+    case "PROJECT":
+      return task.projectId === null
+        ? null
+        : { kind: "project", projectId: task.projectId, plazaId: null };
+    case "PLAZA":
+      return task.projectId === null || task.plazaId === null
+        ? null
+        : {
+            kind: "project",
+            projectId: task.projectId,
+            plazaId: task.plazaId,
+          };
+    case "DEPARTMENT":
+      return task.departmentId === null
+        ? null
+        : { kind: "department", departmentId: task.departmentId };
+    case "HEAD_OFFICE":
+      return { kind: "department", departmentId: null };
   }
-  if (task.projectId !== null) {
-    return {
-      kind: "project",
-      projectId: task.projectId,
-      plazaId: task.plazaId,
-    };
-  }
-  return { kind: "department", departmentId: null };
 }
 
 /**
@@ -97,15 +121,20 @@ export function taskScopeOf(task: TaskScopeFields): TaskScope | null {
  * project, else its department, else Head Office.
  */
 export function scopeRefOf(task: TaskScopeFields): ScopeRef | null {
-  if (task.departmentId !== null) {
-    return { kind: "department", id: task.departmentId };
+  switch (scopeKindOf(task)) {
+    case "PLAZA":
+      return task.plazaId === null ? null : { kind: "plaza", id: task.plazaId };
+    case "PROJECT":
+      return task.projectId === null
+        ? null
+        : { kind: "project", id: task.projectId };
+    case "DEPARTMENT":
+      return task.departmentId === null
+        ? null
+        : { kind: "department", id: task.departmentId };
+    case "HEAD_OFFICE":
+      return { kind: "head-office" };
   }
-  if (task.projectId !== null) {
-    return task.plazaId !== null
-      ? { kind: "plaza", id: task.plazaId }
-      : { kind: "project", id: task.projectId };
-  }
-  return { kind: "head-office" };
 }
 
 /** Stable key for a scope (Head Office level serialises to `"head-office"`). */
@@ -127,22 +156,23 @@ export function scopeKeyOf(scope: TaskScope): string {
  *   plaza tasks (filter semantics; creation is project-level only).
  * - `plaza:<id>` matches only that plaza.
  * - `department:<id>` matches only that department.
- * - `head-office` matches every Head Office task: any task with a department,
- *   plus any task with no project.
+ * - `head-office` matches every Head Office task: department-scoped tasks and
+ *   Head Office-level tasks.
  */
 export function taskMatchesScope(
   task: TaskScopeFields,
-  ref: ScopeRef
+  ref: ScopeRef,
 ): boolean {
+  const kind = scopeKindOf(task);
   switch (ref.kind) {
     case "project":
-      return task.projectId === ref.id;
+      return kind !== "DEPARTMENT" && task.projectId === ref.id;
     case "plaza":
-      return task.plazaId === ref.id;
+      return kind === "PLAZA" && task.plazaId === ref.id;
     case "department":
-      return task.departmentId === ref.id;
+      return kind === "DEPARTMENT" && task.departmentId === ref.id;
     case "head-office":
-      return task.departmentId !== null || task.projectId === null;
+      return kind === "DEPARTMENT" || kind === "HEAD_OFFICE";
   }
 }
 
@@ -160,15 +190,13 @@ export function scopeTaskWhere(scope: TaskScope | null): Prisma.TaskWhereInput {
   if (scope === null) return { id: { in: [] } };
 
   if (scope.kind === "department") {
-    if (scope.departmentId === null) {
-      return {
-        OR: [{ departmentId: { not: null } }, { projectId: null }],
-      };
-    }
-    return { departmentId: scope.departmentId };
+    return scope.departmentId === null
+      ? { scope: { in: ["DEPARTMENT", "HEAD_OFFICE"] } }
+      : { scope: "DEPARTMENT", departmentId: scope.departmentId };
   }
 
+  // Project filter semantics: the project-level tasks plus all its plazas.
   return scope.plazaId === null
     ? { projectId: scope.projectId }
-    : { plazaId: scope.plazaId };
+    : { scope: "PLAZA", plazaId: scope.plazaId };
 }

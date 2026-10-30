@@ -8,6 +8,8 @@ import {
   requireProjectAccess,
   taskScopeWhere,
 } from "@/lib/access";
+import { todayIst } from "@/lib/dates";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { plazaProgress } from "@/lib/progress";
 import { plazaSchema } from "@/lib/validations";
@@ -46,8 +48,7 @@ export async function GET(req: Request): Promise<Response> {
   });
 
   const plazaIds = plazas.map((z) => z.id);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayIst();
 
   const [statusCounts, overdueCounts] = await Promise.all([
     db.task.groupBy({
@@ -105,9 +106,6 @@ export async function GET(req: Request): Promise<Response> {
         projectId: z.projectId,
         project: z.project,
         name: z.name,
-        state: z.state,
-        piu: z.piu,
-        ro: z.ro,
         lengthKm: z.lengthKm,
         active: z.active,
         status: z.active ? "ACTIVE" : "ARCHIVED",
@@ -143,26 +141,38 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const created = await db.plaza.create({
-    data: {
-      projectId: parsed.data.projectId,
-      name: parsed.data.name,
-      state: parsed.data.state ?? null,
-      piu: parsed.data.piu ?? null,
-      ro: parsed.data.ro ?? null,
-      lengthKm: parsed.data.lengthKm ?? null,
-      active: parsed.data.active ?? true,
-    },
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-          acronym: true,
-          company: { select: { id: true, name: true, code: true } },
+  const created = await db.$transaction(async (tx) => {
+    const plaza = await tx.plaza.create({
+      data: {
+        projectId: parsed.data.projectId,
+        name: parsed.data.name,
+        lengthKm: parsed.data.lengthKm ?? null,
+        active: parsed.data.active ?? true,
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            acronym: true,
+            company: { select: { id: true, name: true, code: true } },
+          },
         },
       },
-    },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "Plaza",
+      entityId: plaza.id,
+      action: "CREATE",
+      after: snapshot(plaza, [
+        "projectId",
+        "name",
+        "lengthKm",
+        "active",
+      ]),
+    });
+    return plaza;
   });
 
   return NextResponse.json(created, { status: 201 });

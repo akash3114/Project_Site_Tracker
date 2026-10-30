@@ -3,6 +3,7 @@
 import { ChevronDown } from "lucide-react";
 
 import { fmtDate, isOverdue } from "@/lib/format";
+import { assigneeSummary } from "@/lib/assignee-summary";
 import {
   ALLOWED_TRANSITIONS,
   PRIORITY_LABELS,
@@ -113,8 +114,11 @@ export function TaskRow({
           {PRIORITY_LABELS[priority]}
         </span>
 
-        <span className="mgmt-row-owner">
-          {task.assignee?.name ?? "Unassigned"}
+        <span
+          className="mgmt-row-owner"
+          title={task.assignees.map((person) => person.name).join(", ")}
+        >
+          {assigneeSummary(task.assignees)}
         </span>
 
         <span className="mgmt-row-due" data-late={late ? "true" : "false"}>

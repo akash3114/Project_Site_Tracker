@@ -11,16 +11,24 @@ const emptyToUndefined = (v: unknown) => (v === "" ? undefined : v);
 
 const emptyToNull = (v: unknown) => (v === "" || v === undefined ? null : v);
 
+/**
+ * Ids are opaque strings. Generated rows use cuid(); reference rows use stable
+ * slugs such as `dept_fin`, `office_delhi`, `cat_toll_ops` and `company_neppl`.
+ * Validate shape only — never the cuid format.
+ */
+export const idSchema = z.string().min(1).max(64);
+
 export const companySchema = z.object({
   name: z.string().min(2).max(150),
-  code: z.string().min(1).max(20).optional(),
+  // Required by the database and used as the company's stable short code.
+  code: z.string().min(1).max(20),
   active: z.boolean().optional(),
 });
 
 export const updateCompanySchema = companySchema.partial();
 
 export const projectSchema = z.object({
-  companyId: z.string().cuid(),
+  companyId: idSchema,
   name: z.string().min(3).max(150),
   acronym: z.preprocess(emptyToUndefined, z.string().max(20).optional()),
   round: z.enum(["ROUND_1", "ROUND_2", "ROUND_3", "ROUND_4"]),
@@ -37,11 +45,8 @@ export const projectSchema = z.object({
 export const updateProjectSchema = projectSchema.partial();
 
 export const plazaSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: idSchema,
   name: z.string().min(3).max(150),
-  state: z.preprocess(emptyToUndefined, z.string().max(100).optional()),
-  piu: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
-  ro: z.preprocess(emptyToUndefined, z.string().max(150).optional()),
   lengthKm: z.preprocess(
     emptyToUndefined,
     z.coerce.number().positive().max(100000).optional(),
@@ -61,6 +66,8 @@ export const userSchema = z.object({
   title: z.string().max(100).optional(),
   password: z.string().min(6),
   isAdmin: z.boolean().default(false),
+  // Reporting line. Admin-only; validated for cycles in the route.
+  managerId: z.preprocess(emptyToNull, idSchema.nullable().optional()),
 });
 
 export const updateUserSchema = z.object({
@@ -70,44 +77,42 @@ export const updateUserSchema = z.object({
   isAdmin: z.boolean().optional(),
   active: z.boolean().optional(),
   password: z.string().min(6).optional(),
+  managerId: z.preprocess(emptyToNull, idSchema.nullable().optional()),
 });
 
-// Department ids can be non-cuid (e.g. `dept_admin` from the migration), so
-// these schemas validate presence only.
 export const headOfficeMembershipSchema = z.object({
-  userId: z.string().min(1),
-  departmentId: z.string().min(1),
+  userId: idSchema,
+  departmentId: idSchema,
   isPrimary: z.boolean().default(false),
 });
 
 export const headOfficeMembershipUpdateSchema = z.object({
-  userId: z.string().min(1),
-  departmentId: z.string().min(1),
+  userId: idSchema,
+  departmentId: idSchema,
   isPrimary: z.boolean(),
 });
 
 export const projectAssignmentSchema = z.object({
-  projectId: z.string().cuid(),
-  userId: z.string().cuid(),
+  projectId: idSchema,
+  userId: idSchema,
   isPrimary: z.boolean().default(false),
 });
 
 export const plazaAssignmentSchema = z.object({
-  plazaId: z.string().cuid(),
-  userId: z.string().cuid(),
+  plazaId: idSchema,
+  userId: idSchema,
   role: z.enum(["TOLL", "MAINTENANCE", "CORRIDOR"]),
   isPrimary: z.boolean().default(false),
 });
 
 // A task belongs to exactly one scope: a project (optionally narrowed to a
 // plaza) or Head Office (optionally narrowed to a department). An empty scope
-// means Head Office level. Department ids can be non-cuid (e.g. `dept_admin`),
-// so they validate presence only. A plaza may arrive without its project; the
-// route resolves and stores the project before writing.
+// means Head Office level. A plaza may arrive without its project; the route
+// resolves and stores the project before writing.
 const taskScopeObject = z.object({
-  projectId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
-  plazaId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
-  departmentId: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  projectId: z.preprocess(emptyToUndefined, idSchema.optional()),
+  plazaId: z.preprocess(emptyToUndefined, idSchema.optional()),
+  departmentId: z.preprocess(emptyToUndefined, idSchema.optional()),
 });
 
 function taskScopeIssues(
@@ -137,13 +142,24 @@ function taskScopeIssues(
 
 export const taskScopeSchema = taskScopeObject.superRefine(taskScopeIssues);
 
+/** Hard cap on assignees per task; keeps payloads and pickers sane. */
+export const MAX_TASK_ASSIGNEES = 20;
+
+/** Deduplicated list of assignee ids. */
+const assigneeIdsField = z
+  .array(idSchema)
+  .max(MAX_TASK_ASSIGNEES)
+  .transform((ids) => Array.from(new Set(ids)));
+
 export const createTaskSchema = taskScopeObject
   .extend({
-    categoryId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    categoryId: z.preprocess(emptyToUndefined, idSchema.optional()),
     title: z.string().min(3).max(200),
     description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
     priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
-    assigneeId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    assigneeIds: assigneeIdsField.optional(),
+    /** @deprecated Use `assigneeIds`; kept for one release. */
+    assigneeId: z.preprocess(emptyToUndefined, idSchema.optional()),
     dueDate: z.preprocess(
       emptyToUndefined,
       z
@@ -172,7 +188,9 @@ export const createTasksSchema = z
     title: z.string().min(3).max(200),
     description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
     priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
-    assigneeId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    assigneeIds: assigneeIdsField.optional(),
+    /** @deprecated Use `assigneeIds`; kept for one release. */
+    assigneeId: z.preprocess(emptyToUndefined, idSchema.optional()),
     dueDate: z.preprocess(
       emptyToUndefined,
       z
@@ -180,7 +198,7 @@ export const createTasksSchema = z
         .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
         .optional(),
     ),
-    categoryId: z.preprocess(emptyToUndefined, z.string().cuid().optional()),
+    categoryId: z.preprocess(emptyToUndefined, idSchema.optional()),
   })
   .superRefine((value, ctx) => {
     const seen = new Set<string>();
@@ -204,7 +222,7 @@ export const updateTaskSchema = z.object({
     z.string().max(5000).nullable().optional(),
   ),
   priority: z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
-  categoryId: z.preprocess(emptyToNull, z.string().cuid().nullable().optional()),
+  categoryId: z.preprocess(emptyToNull, idSchema.nullable().optional()),
   dueDate: z.preprocess(
     emptyToUndefined,
     z
@@ -220,14 +238,27 @@ export const statusSchema = z.object({
   text: z.string().max(2000).optional(),
 });
 
-export const assignSchema = z.object({
-  assigneeId: z.string().cuid().nullable(),
-});
+export const assignSchema = z
+  .object({
+    assigneeIds: assigneeIdsField.optional(),
+    /** @deprecated Use `assigneeIds`; kept for one release. */
+    assigneeId: idSchema.nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.assigneeIds !== undefined || value.assigneeId !== undefined,
+    { message: "Provide assigneeIds (an empty array clears the assignees)" },
+  )
+  .transform((value) => ({
+    assigneeIds:
+      value.assigneeIds ??
+      (value.assigneeId ? [value.assigneeId] : []),
+  }));
 
 export const commentSchema = z
   .object({
     text: z.string().max(2000).default(""),
-    attachmentIds: z.array(z.string().cuid()).max(10).optional(),
+    attachmentIds: z.array(idSchema).max(10).optional(),
   })
   .refine(
     (value) =>
@@ -243,7 +274,7 @@ export const reopenRequestSchema = z.object({
 });
 
 export const reopenDecisionSchema = z.object({
-  requestId: z.string().cuid(),
+  requestId: idSchema,
   decision: z.enum(["APPROVE", "REJECT"]),
   note: z.string().max(2000).optional(),
 });
@@ -256,13 +287,13 @@ export const categorySchema = z.object({
 export const updateCategorySchema = categorySchema.partial();
 
 export const plazaAssignmentInputSchema = z.object({
-  plazaId: z.string().cuid(),
+  plazaId: idSchema,
   role: z.enum(["TOLL", "MAINTENANCE", "CORRIDOR"]),
   isPrimary: z.boolean().default(false),
 });
 
 export const accessPutSchema = z.object({
-  userId: z.string().cuid(),
+  userId: idSchema,
   assignments: z.array(plazaAssignmentInputSchema).max(500),
 });
 

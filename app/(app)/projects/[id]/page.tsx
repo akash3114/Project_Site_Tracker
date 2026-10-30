@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { assigneeSummary } from "@/lib/assignee-summary";
 import { fmtDate, isOverdue } from "@/lib/format";
 import { ProgressBar } from "@/components/progress-bar";
 import { StatusBadge } from "@/components/status-badge";
@@ -33,9 +34,6 @@ type ProjectDetail = {
 type PlazaRow = {
   id: string;
   name: string;
-  state?: string | null;
-  piu?: string | null;
-  ro?: string | null;
   lengthKm?: number | null;
   active: boolean;
   status: string;
@@ -50,7 +48,7 @@ type ProjectTask = {
   priority: string;
   dueDate?: string | null;
   category?: { id: string; name: string } | null;
-  assignee?: { id: string; name: string } | null;
+  assignees?: Array<{ id: string; name: string }>;
   plaza?: { id: string; name: string } | null;
 };
 
@@ -59,12 +57,15 @@ function roundLabel(round: string | null | undefined): string {
   return round.replace(/^ROUND_/, "Round ");
 }
 
-function plazaRowMeta(z: PlazaRow): string {
+function plazaRowMeta(
+  z: PlazaRow,
+  project: ProjectDetail | null,
+): string {
   const parts: string[] = [];
-  if (z.state) parts.push(z.state);
+  if (project?.state) parts.push(project.state);
   if (typeof z.lengthKm === "number") parts.push(`${z.lengthKm} km`);
-  if (z.piu) parts.push(`PIU ${z.piu}`);
-  if (z.ro) parts.push(`RO ${z.ro}`);
+  if (project?.piu) parts.push(`PIU ${project.piu}`);
+  if (project?.ro) parts.push(`RO ${project.ro}`);
   return parts.join(" · ");
 }
 
@@ -160,9 +161,11 @@ export default function ProjectPage() {
   {
     const seen = new Set<string>();
     for (const task of projectTasks ?? []) {
-      if (task.assignee && !seen.has(task.assignee.id)) {
-        seen.add(task.assignee.id);
-        drawerAssignees.push(task.assignee);
+      for (const person of task.assignees ?? []) {
+        if (!seen.has(person.id)) {
+          seen.add(person.id);
+          drawerAssignees.push({ id: person.id, name: person.name });
+        }
       }
     }
   }
@@ -293,8 +296,8 @@ export default function ProjectPage() {
                         Archived
                       </span>
                     ) : null}
-                    {plazaRowMeta(z) ? (
-                      <span className="font-mono text-xs text-[#66756D]">{plazaRowMeta(z)}</span>
+                    {plazaRowMeta(z, project) ? (
+                      <span className="font-mono text-xs text-[#66756D]">{plazaRowMeta(z, project)}</span>
                     ) : null}
                     <span className="ml-auto font-mono text-xs text-[#586760]">
                       {z.task.completed}/{z.task.total}
@@ -359,7 +362,7 @@ export default function ProjectPage() {
                             </span>
                           </span>
                           <span className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-[#586760]">
-                            <span>{task.assignee?.name ?? "Unassigned"}</span>
+                            <span>{assigneeSummary(task.assignees)}</span>
                             <span className={overdue ? "font-medium text-[#8F2824]" : undefined}>
                               Due {fmtDate(task.dueDate)}
                               {overdue ? " · overdue" : ""}

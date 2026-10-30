@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { updateCompanySchema } from "@/lib/validations";
 
@@ -23,9 +24,20 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
   const exists = await db.company.findUnique({ where: { id: params.id } });
   if (!exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const updated = await db.company.update({
-    where: { id: params.id },
-    data: parsed.data,
+  const updated = await db.$transaction(async (tx) => {
+    const next = await tx.company.update({
+      where: { id: params.id },
+      data: parsed.data,
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "Company",
+      entityId: next.id,
+      action: parsed.data.active === false ? "ARCHIVE" : "UPDATE",
+      before: snapshot(exists, ["name", "code", "active"]),
+      after: snapshot(next, ["name", "code", "active"]),
+    });
+    return next;
   });
   return NextResponse.json(updated);
 }

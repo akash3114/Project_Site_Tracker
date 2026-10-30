@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { accessibleProjectIds, getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { companySchema } from "@/lib/validations";
 
@@ -46,12 +47,35 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const { name, code, active } = parsed.data;
-  const created = await db.company.create({
-    data: {
-      name,
-      code: code || name.replace(/[^A-Z]/g, "").slice(0, 8) || "COMPANY",
-      active: active ?? true,
-    },
+
+  const clash = await db.company.findFirst({
+    where: { OR: [{ name }, { code }] },
+    select: { name: true, code: true },
+  });
+  if (clash) {
+    return NextResponse.json(
+      {
+        error:
+          clash.code === code
+            ? "Company code already in use"
+            : "Company name already in use",
+      },
+      { status: 409 },
+    );
+  }
+
+  const created = await db.$transaction(async (tx) => {
+    const company = await tx.company.create({
+      data: { name, code, active: active ?? true },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "Company",
+      entityId: company.id,
+      action: "CREATE",
+      after: snapshot(company, ["name", "code", "active"]),
+    });
+    return company;
   });
   return NextResponse.json(created, { status: 201 });
 }

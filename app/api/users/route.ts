@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 
 import { getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import type { Role } from "@/lib/labels";
+import { managerCycleError } from "@/lib/reporting";
 import { userSchema } from "@/lib/validations";
 
 const assignmentInclude = {
@@ -17,6 +19,7 @@ const assignmentInclude = {
   },
   projectAssignments: { select: { projectId: true } },
   plazaAssignments: { select: { plazaId: true, role: true } },
+  manager: { select: { id: true, name: true } },
 } as const;
 
 function displayRole(user: {
@@ -95,6 +98,8 @@ export async function GET(): Promise<Response> {
         projectIds: u.projectAssignments.map((r) => r.projectId),
         plazaIds: u.plazaAssignments.map((r) => r.plazaId),
         plazaRoles: u.plazaAssignments,
+        managerId: u.manager?.id ?? null,
+        managerName: u.manager?.name ?? null,
       };
     }),
   );
@@ -121,27 +126,53 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Email already in use" }, { status: 409 });
   }
 
-  const created = await db.user.create({
-    data: {
-      name: parsed.data.name,
-      email,
-      phone: parsed.data.phone ?? null,
-      title: parsed.data.title?.trim() || null,
-      passwordHash: await bcrypt.hash(parsed.data.password, 12),
-      isAdmin: parsed.data.isAdmin,
-      active: true,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      title: true,
-      isAdmin: true,
-      active: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  const managerId = parsed.data.managerId ?? null;
+  const cycleError = await managerCycleError("", managerId);
+  if (cycleError) {
+    return NextResponse.json({ error: cycleError }, { status: 422 });
+  }
+
+  const created = await db.$transaction(async (tx) => {
+    const next = await tx.user.create({
+      data: {
+        name: parsed.data.name,
+        email,
+        phone: parsed.data.phone ?? null,
+        title: parsed.data.title?.trim() || null,
+        passwordHash: await bcrypt.hash(parsed.data.password, 12),
+        isAdmin: parsed.data.isAdmin,
+        active: true,
+        managerId,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        title: true,
+        isAdmin: true,
+        active: true,
+        managerId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "User",
+      entityId: next.id,
+      action: "CREATE",
+      after: snapshot(next, [
+        "name",
+        "email",
+        "phone",
+        "title",
+        "isAdmin",
+        "active",
+        "managerId",
+      ]),
+    });
+    return next;
   });
 
   return NextResponse.json(

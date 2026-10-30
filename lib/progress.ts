@@ -21,17 +21,4 @@ export function plazaProgress(completed: number, total: number): number {
   return Math.round((100 * completed) / total);
 }
 
-export function isOverdue(
-  dueDate: Date | string | null | undefined,
-  status: TaskStatus | string,
-  today: Date = new Date(),
-): boolean {
-  if (!dueDate || status === "COMPLETED") return false;
-  const due = new Date(dueDate);
-  due.setHours(0, 0, 0, 0);
-  const t = new Date(today);
-  t.setHours(0, 0, 0, 0);
-  return due.getTime() < t.getTime();
-}
-
 export type TaskScopeWhere = Prisma.TaskWhereInput;

@@ -24,6 +24,21 @@ function slug(name: string): string {
   return base || "user";
 }
 
+/** Lowercase, collapse runs of non-alphanumerics, trim the separator. */
+function refSlug(value: string, separator: "-" | "_" = "-"): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, separator)
+    .replace(new RegExp(`^\\${separator}+|\\${separator}+$`, "g"), "");
+}
+
+// Reference/catalogue rows use stable slugs so every environment is identical
+// (see prisma/schema.prisma conventions and docs/DATABASE.md).
+const departmentIdFor = (code: string) => `dept_${refSlug(code)}`;
+const officeIdFor = (name: string) => `office_${refSlug(name)}`;
+const companyIdFor = (code: string) => `company_${refSlug(code)}`;
+const categoryIdFor = (name: string) => `cat_${refSlug(name, "_")}`;
+
 function roundEnum(n: number): "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4" {
   if (n === 2) return "ROUND_2";
   if (n === 3) return "ROUND_3";
@@ -201,9 +216,11 @@ const HEAD_OFFICE_TASKS: {
 async function main(): Promise<void> {
   // Fresh pilot data: wipe in FK-safe order, then rebuild from master-data.md.
   if (process.env.SEED_RESET === "1") {
+    await db.auditLog.deleteMany();
     await db.taskAttachment.deleteMany();
     await db.taskActivity.deleteMany();
     await db.taskReopenRequest.deleteMany();
+    await db.taskAssignee.deleteMany();
     await db.task.deleteMany();
     await db.plazaAssignment.deleteMany();
     await db.projectAssignment.deleteMany();
@@ -229,9 +246,9 @@ async function main(): Promise<void> {
   }
 
   // ---- Head Office catalogue --------------------------------------------
-  // Upserted by their natural keys: the migration already created Admin /
-  // Delhi / Mumbai with fixed ids and the backfilled memberships point at
-  // them, so these rows must survive (and the ids must not change).
+  // Upserted by their natural keys and created with stable slug ids. The
+  // migration rewrites any older cuid/`dept_*` ids to the same slugs, so these
+  // rows survive a reseed with their ids intact.
   const departmentIdByCode = new Map<string, string>();
   for (const masterDepartment of MASTER_DEPARTMENTS) {
     const department = await db.department.upsert({
@@ -242,6 +259,7 @@ async function main(): Promise<void> {
         active: true,
       },
       create: {
+        id: departmentIdFor(masterDepartment.code),
         name: masterDepartment.name,
         code: masterDepartment.code,
         sortOrder: masterDepartment.sortOrder,
@@ -257,6 +275,7 @@ async function main(): Promise<void> {
       where: { name: masterOffice.name },
       update: { city: masterOffice.city || null, active: true },
       create: {
+        id: officeIdFor(masterOffice.name),
         name: masterOffice.name,
         city: masterOffice.city || null,
         active: true,
@@ -302,6 +321,7 @@ async function main(): Promise<void> {
   for (const masterCompany of MASTER_COMPANIES) {
     const company = await db.company.create({
       data: {
+        id: companyIdFor(masterCompany.code),
         name: masterCompany.name,
         code: masterCompany.code,
         active: true,
@@ -334,9 +354,6 @@ async function main(): Promise<void> {
           data: {
             projectId: project.id,
             name: masterPlaza.name,
-            state: masterProject.state || null,
-            piu: null,
-            ro: null,
             lengthKm: masterPlaza.lengthKm,
             active: true,
           },
@@ -487,10 +504,48 @@ async function main(): Promise<void> {
     }
   }
 
+  // ---- Reporting line ----------------------------------------------------
+  // Derive a demo chain from the master data: field people report to the
+  // first project manager of the first project they work on, project managers
+  // and Head Office leads report to the C-suite account, which reports to the
+  // admin. An Admin can change any link later in Admin -> Users.
+  const managerIdByUserId = new Map<string, string>();
+  for (const c of MASTER_COMPANIES) {
+    for (const p of c.projects) {
+      const pmId = p.pms.map((name) => userIdByName.get(name)).find(Boolean);
+      for (const name of p.pms) {
+        const userId = userIdByName.get(name);
+        if (userId) managerIdByUserId.set(userId, management.id);
+      }
+      for (const z of p.plazas) {
+        for (const name of [...z.toll, ...z.maintenance, ...z.corridor]) {
+          const userId = userIdByName.get(name);
+          if (userId && !managerIdByUserId.has(userId)) {
+            managerIdByUserId.set(userId, pmId ?? management.id);
+          }
+        }
+      }
+    }
+  }
+  for (const leadId of Array.from(headOfficeLeadIdByCode.values())) {
+    managerIdByUserId.set(leadId, management.id);
+  }
+  managerIdByUserId.set(management.id, admin.id);
+
+  for (const [userId, managerId] of Array.from(managerIdByUserId.entries())) {
+    if (userId === managerId) continue;
+    await db.user.update({
+      where: { id: userId },
+      data: { managerId },
+    });
+  }
+
   // ---- Categories --------------------------------------------------------
   const categories = await Promise.all(
     CATEGORY_NAMES.map((name) =>
-      db.taskCategory.create({ data: { name, active: true } }),
+      db.taskCategory.create({
+        data: { id: categoryIdFor(name), name, active: true },
+      }),
     ),
   );
 
@@ -540,10 +595,21 @@ async function main(): Promise<void> {
       : project.plazas[i % project.plazas.length];
     const members = plaza ? (plazaMembers.get(plaza.id) ?? []) : [];
     const pmId = project.assignments[0]?.userId ?? null;
-    const assigneeId =
+    const primaryAssigneeId =
       members.length > 0
         ? members[i % members.length]
         : (pmId ?? null);
+    // Give a few plaza tasks a second assignee so the multi-assignee UI is
+    // exercised immediately after a fresh seed.
+    const assigneeIds = Array.from(
+      new Set(
+        [
+          primaryAssigneeId,
+          members.length > 1 && i % 7 === 0 ? members[(i + 1) % members.length] : null,
+        ].filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const assigneeId = assigneeIds[0] ?? null;
     const status = statuses[i] ?? "TODO";
     const priority = priorities[i % priorities.length];
     const createdById = i % 4 === 3 && pmId ? pmId : management.id;
@@ -554,6 +620,7 @@ async function main(): Promise<void> {
 
     const task = await db.task.create({
       data: {
+        scope: plaza ? "PLAZA" : "PROJECT",
         projectId: project.id,
         plazaId: plaza?.id ?? null,
         categoryId: categories[i % categories.length].id,
@@ -563,7 +630,12 @@ async function main(): Promise<void> {
           : `Sample task ${i + 1}/41: ${TASK_TITLES[i]} at ${plaza?.name} plaza, ${project.name}.`,
         status,
         priority,
-        assigneeId,
+        assignees: {
+          create: assigneeIds.map((userId) => ({
+            userId,
+            assignedById: createdById,
+          })),
+        },
         createdById,
         dueDate: dueDateFor(i, now),
         completedAt,
@@ -583,7 +655,7 @@ async function main(): Promise<void> {
       },
     });
 
-    if (assigneeId) {
+    for (const userId of assigneeIds) {
       await db.taskActivity.create({
         data: {
           taskId: task.id,
@@ -591,7 +663,7 @@ async function main(): Promise<void> {
           type: "ASSIGNED",
           fromStatus: "TODO",
           toStatus: "TODO",
-          toAssigneeId: assigneeId,
+          toAssigneeId: userId,
         },
       });
     }
@@ -624,17 +696,21 @@ async function main(): Promise<void> {
   // One completed task carries a pending PM reopen request so the HO
   // approval workflow is visible immediately after a fresh seed.
   const completed = await db.task.findFirst({
-    where: { status: "COMPLETED", assigneeId: { not: null } },
+    where: { status: "COMPLETED", assignees: { some: {} } },
     orderBy: { createdAt: "asc" },
-    select: { id: true, assigneeId: true },
+    select: {
+      id: true,
+      assignees: { select: { userId: true }, take: 1 },
+    },
   });
-  if (completed?.assigneeId) {
+  const completedAssigneeId = completed?.assignees[0]?.userId ?? null;
+  if (completed && completedAssigneeId) {
     const reason =
       "Pavement patch was re-opened by the contractor; please allow re-verification.";
     await db.taskReopenRequest.create({
       data: {
         taskId: completed.id,
-        requestedById: completed.assigneeId,
+        requestedById: completedAssigneeId,
         reason,
         status: "PENDING",
       },
@@ -642,7 +718,7 @@ async function main(): Promise<void> {
     await db.taskActivity.create({
       data: {
         taskId: completed.id,
-        actorId: completed.assigneeId,
+        actorId: completedAssigneeId,
         type: "REOPEN_REQUESTED",
         fromStatus: "COMPLETED",
         toStatus: "COMPLETED",
@@ -672,6 +748,7 @@ async function main(): Promise<void> {
 
     const task = await db.task.create({
       data: {
+        scope: "DEPARTMENT",
         projectId: null,
         plazaId: null,
         departmentId,
@@ -680,7 +757,9 @@ async function main(): Promise<void> {
         description: demo.description,
         status: demo.status,
         priority: demo.priority,
-        assigneeId,
+        assignees: assigneeId
+          ? { create: [{ userId: assigneeId, assignedById: management.id }] }
+          : undefined,
         createdById: management.id,
         dueDate: dueDateInDays(demo.dueInDays, now),
         completedAt,
@@ -741,6 +820,7 @@ async function main(): Promise<void> {
     headOfficeMemberships,
     activities,
     pendingReopen,
+    taskAssignees,
   ] = await Promise.all([
     db.company.count(),
     db.project.count(),
@@ -754,6 +834,7 @@ async function main(): Promise<void> {
     db.headOfficeMembership.count(),
     db.taskActivity.count(),
     db.taskReopenRequest.count({ where: { status: "PENDING" } }),
+    db.taskAssignee.count(),
   ]);
 
   // eslint-disable-next-line no-console
@@ -771,6 +852,7 @@ async function main(): Promise<void> {
       departmentTasks,
       activities,
       pendingReopen,
+      taskAssignees,
       categories: categories.length,
       taskIds: createdTaskIds.length,
       headOfficeTasks,

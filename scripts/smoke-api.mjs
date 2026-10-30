@@ -618,7 +618,7 @@ async function main() {
       projectId: site.plaza.projectId,
       title: "Smoke: project-level task for someone else",
       priority: "LOW",
-      ...(otherAssignee ? { assigneeId: otherAssignee.id } : {}),
+      ...(otherAssignee ? { assigneeIds: [otherAssignee.id] } : {}),
     });
     if (unassignedProjectTask.data?.id) {
       createdTaskIds.push(unassignedProjectTask.data.id);
@@ -629,7 +629,7 @@ async function main() {
       projectId: site.plaza.projectId,
       title: "Smoke: project-level task for site manager",
       priority: "LOW",
-      assigneeId: site.userId,
+      assigneeIds: [site.userId],
     });
     if (myProjectTask.data?.id) createdTaskIds.push(myProjectTask.data.id);
 
@@ -642,7 +642,7 @@ async function main() {
             OR: [
               { plazaId: { in: sitePlazas.map((p) => p.plazaId) } },
               { projectId: { in: sitePmProjects.map((p) => p.projectId) } },
-              { assigneeId: site.userId },
+              { assignees: { some: { userId: site.userId } } },
             ],
           },
           select: { id: true },
@@ -716,11 +716,11 @@ async function main() {
     });
     const siblingSite = await db.plazaAssignment.findFirst({
       where: { plazaId: site.plaza.id, userId: { not: site.userId } },
-      select: { userId: true },
+      select: { userId: true, user: { select: { id: true, email: true } } },
     });
     if (ownPlazaTask.data?.id && hoUser) {
       const denied = await api(siteLogin, "POST", `/api/tasks/${ownPlazaTask.data.id}/assign`, {
-        assigneeId: hoUser.id,
+        assigneeIds: [hoUser.id],
       });
       check(
         "site manager cannot assign a Head Office user",
@@ -730,13 +730,234 @@ async function main() {
     }
     if (ownPlazaTask.data?.id && siblingSite) {
       const allowed = await api(siteLogin, "POST", `/api/tasks/${ownPlazaTask.data.id}/assign`, {
-        assigneeId: siblingSite.userId,
+        assigneeIds: [siblingSite.userId],
       });
       check(
         "site manager can assign a colleague on the same plaza",
         allowed.status === 200,
         `HTTP ${allowed.status}`,
       );
+    }
+
+    // --- Multi-assignee + reporting hierarchy ---------------------------
+    if (siblingSite) {
+      const multi = await api(admin, "POST", "/api/tasks", {
+        plazaId: site.plaza.id,
+        title: "Smoke: multi-assignee task",
+        priority: "LOW",
+        assigneeIds: [site.userId, siblingSite.userId],
+      });
+      if (multi.data?.id) createdTaskIds.push(multi.data.id);
+      check(
+        "task can be created with two assignees",
+        multi.status === 201 && (multi.data?.assignees ?? []).length === 2,
+        `HTTP ${multi.status}, ${(multi.data?.assignees ?? []).length} assignees`,
+      );
+
+      const multiDetail = multi.data?.id
+        ? await api(admin, "GET", `/api/tasks/${multi.data.id}`)
+        : { status: 0, data: null };
+      check(
+        "detail payload exposes assignees[]",
+        multiDetail.status === 200 &&
+          Array.isArray(multiDetail.data?.task?.assignees) &&
+          multiDetail.data.task.assignees.length === 2,
+        `HTTP ${multiDetail.status}`,
+      );
+
+      const siblingLogin = await login(siblingSite.user.email, "Tracker@123");
+      const siblingView = multi.data?.id
+        ? await api(siblingLogin, "GET", `/api/tasks/${multi.data.id}`)
+        : { status: 0, data: null };
+      check(
+        "a second assignee can open the same task",
+        siblingView.status === 200,
+        `HTTP ${siblingView.status}`,
+      );
+
+      const one = multi.data?.id
+        ? await api(admin, "POST", `/api/tasks/${multi.data.id}/assign`, {
+            assigneeIds: [site.userId],
+          })
+        : { status: 0, data: null };
+      check(
+        "assign replaces the whole set",
+        one.status === 200 && (one.data?.assignees ?? []).length === 1,
+        `HTTP ${one.status}, ${(one.data?.assignees ?? []).length} assignees`,
+      );
+
+      const cleared = multi.data?.id
+        ? await api(admin, "POST", `/api/tasks/${multi.data.id}/assign`, {
+            assigneeIds: [],
+          })
+        : { status: 0, data: null };
+      check(
+        "empty assigneeIds clears the set",
+        cleared.status === 200 && (cleared.data?.assignees ?? []).length === 0,
+        `HTTP ${cleared.status}, ${(cleared.data?.assignees ?? []).length} assignees`,
+      );
+
+      const alias = multi.data?.id
+        ? await api(admin, "POST", `/api/tasks/${multi.data.id}/assign`, {
+            assigneeId: siblingSite.userId,
+          })
+        : { status: 0, data: null };
+      check(
+        "deprecated assigneeId alias still sets one assignee",
+        alias.status === 200 &&
+          (alias.data?.assignees ?? []).length === 1 &&
+          alias.data.assignees[0]?.id === siblingSite.userId,
+        `HTTP ${alias.status}, ${(alias.data?.assignees ?? []).length} assignees`,
+      );
+      if (multi.data?.id) {
+        await api(admin, "POST", `/api/tasks/${multi.data.id}/assign`, {
+          assigneeIds: [],
+        });
+      }
+
+      // A plaza peer who is not an assignee may view/comment but not move status.
+      const peer = await db.plazaAssignment.findFirst({
+        where: {
+          plazaId: site.plaza.id,
+          userId: { notIn: [site.userId, siblingSite.userId] },
+        },
+        include: { user: true },
+      });
+      if (peer && multi.data?.id) {
+        const peerLogin = await login(peer.user.email, "Tracker@123");
+        const peerView = await api(peerLogin, "GET", `/api/tasks/${multi.data.id}`);
+        const peerMove = await api(
+          peerLogin,
+          "POST",
+          `/api/tasks/${multi.data.id}/status`,
+          { to: "IN_PROGRESS" },
+        );
+        check(
+          "same-plaza peer can view a task",
+          peerView.status === 200,
+          `HTTP ${peerView.status}`,
+        );
+        check(
+          "same-plaza peer cannot change status",
+          peerMove.status === 403,
+          `HTTP ${peerMove.status}`,
+        );
+      }
+
+      // A senior with no plaza/project assignment on this task, linked through
+      // the reporting line, must see and act on it without gaining edit rights.
+      const seniorAssignment = await db.plazaAssignment.findFirst({
+        where: {
+          plazaId: { not: site.plaza.id },
+          user: {
+            isAdmin: false,
+            headOfficeMemberships: { none: {} },
+            projectAssignments: { none: {} },
+          },
+        },
+        include: { user: true },
+      });
+      if (seniorAssignment) {
+        const originalManager = await db.user.findUnique({
+          where: { id: site.userId },
+          select: { managerId: true },
+        });
+
+        const setManager = await api(admin, "PATCH", `/api/users/${site.userId}`, {
+          managerId: seniorAssignment.userId,
+        });
+        check(
+          "admin can set a reporting line",
+          setManager.status === 200,
+          `HTTP ${setManager.status}`,
+        );
+
+        const juniorTask = await api(admin, "POST", "/api/tasks", {
+          plazaId: site.plaza.id,
+          title: "Smoke: junior task for manager visibility",
+          priority: "LOW",
+          assigneeIds: [site.userId],
+        });
+        if (juniorTask.data?.id) createdTaskIds.push(juniorTask.data.id);
+
+        const seniorLogin = await login(seniorAssignment.user.email, "Tracker@123");
+        const seniorView = juniorTask.data?.id
+          ? await api(seniorLogin, "GET", `/api/tasks/${juniorTask.data.id}`)
+          : { status: 0, data: null };
+        check(
+          "manager above sees a junior's task",
+          seniorView.status === 200,
+          `HTTP ${seniorView.status}`,
+        );
+
+        const seniorList = await api(seniorLogin, "GET", "/api/tasks?pageSize=100");
+        check(
+          "manager's task list includes the junior's task",
+          (seniorList.data?.items ?? []).some(
+            (task) => task.id === juniorTask.data?.id,
+          ),
+        );
+
+        const seniorStatus = juniorTask.data?.id
+          ? await api(seniorLogin, "POST", `/api/tasks/${juniorTask.data.id}/status`, {
+              to: "IN_PROGRESS",
+            })
+          : { status: 0, data: null };
+        check(
+          "manager above can change the junior's task status",
+          seniorStatus.status === 200,
+          `HTTP ${seniorStatus.status}`,
+        );
+
+        const seniorEdit = juniorTask.data?.id
+          ? await api(seniorLogin, "PATCH", `/api/tasks/${juniorTask.data.id}`, {
+              title: "Manager edit should fail",
+            })
+          : { status: 0, data: null };
+        check(
+          "manager-only observer cannot edit fields",
+          seniorEdit.status === 403,
+          `HTTP ${seniorEdit.status}`,
+        );
+
+        const seniorAssign = juniorTask.data?.id
+          ? await api(seniorLogin, "POST", `/api/tasks/${juniorTask.data.id}/assign`, {
+              assigneeIds: [seniorAssignment.userId],
+            })
+          : { status: 0, data: null };
+        check(
+          "manager-only observer cannot reassign",
+          seniorAssign.status === 403,
+          `HTTP ${seniorAssign.status}`,
+        );
+
+        const seniorComment = juniorTask.data?.id
+          ? await api(seniorLogin, "POST", `/api/tasks/${juniorTask.data.id}/comments`, {
+              text: "Seen by the manager",
+            })
+          : { status: 0, data: null };
+        check(
+          "manager above can comment on the junior's task",
+          seniorComment.status === 201,
+          `HTTP ${seniorComment.status}`,
+        );
+
+        const cycle = await api(
+          admin,
+          "PATCH",
+          `/api/users/${seniorAssignment.userId}`,
+          { managerId: site.userId },
+        );
+        check(
+          "reporting cycle is rejected",
+          cycle.status === 422,
+          `HTTP ${cycle.status}`,
+        );
+
+        await api(admin, "PATCH", `/api/users/${site.userId}`, {
+          managerId: originalManager?.managerId ?? null,
+        });
+      }
     }
 
     // Head Office tasks are Admin/HO-owned: a site manager may be assigned one
@@ -746,7 +967,7 @@ async function main() {
         departmentId: firstDepartment.id,
         title: "Smoke: HO task assigned to site manager",
         priority: "LOW",
-        assigneeId: site.userId,
+        assigneeIds: [site.userId],
       });
       if (hoTask.data?.id) createdTaskIds.push(hoTask.data.id);
       const hoVisible = hoTask.data?.id
@@ -759,7 +980,7 @@ async function main() {
       );
       const hoReassign = hoTask.data?.id
         ? await api(siteLogin, "POST", `/api/tasks/${hoTask.data.id}/assign`, {
-            assigneeId: site.userId,
+            assigneeIds: [site.userId],
           })
         : { status: 0, data: null };
       check(
@@ -882,7 +1103,7 @@ async function main() {
           pmLogin,
           "POST",
           `/api/tasks/${create.data.id}/assign`,
-          { assigneeId: site?.userId ?? null },
+          { assigneeIds: site ? [site.userId] : [] },
         );
         check(
           "PM assignment follows the ceiling",

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { getSessionUser, requireTaskAccess } from "@/lib/access";
+import {
+  canChangeTaskStatus,
+  getSessionUser,
+  requireTaskAccess,
+} from "@/lib/access";
 import { db } from "@/lib/db";
-import { taskInclude } from "@/lib/task-data";
+import { serializeTask, taskInclude } from "@/lib/task-data";
 import { canTransition } from "@/lib/transitions";
 import { statusSchema } from "@/lib/validations";
 
@@ -31,6 +35,9 @@ export async function POST(
         { error: "Task is completed. Request or approve a reopen first." },
         { status: 422 },
       );
+    }
+    if (!canChangeTaskStatus(access)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     if (!canTransition(access.task.status, to)) {
       return NextResponse.json(
@@ -63,7 +70,7 @@ export async function POST(
       return next;
     });
 
-    return NextResponse.json(updated);
+    return NextResponse.json(serializeTask(updated));
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

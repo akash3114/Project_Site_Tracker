@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import { startOfWeekIst, todayIst } from "./dates";
 import { db } from "./db";
 import { plazaProgress } from "./progress";
 
@@ -37,15 +38,6 @@ export type HeadOfficeStats = {
   overdue: number;
   progressPct: number;
 };
-
-function startOfWeekIST(now: Date): Date {
-  // Monday 00:00 IST ≈ Sunday 18:30 UTC previous day; approximate with UTC Monday.
-  const d = new Date(now);
-  const day = (d.getUTCDay() + 6) % 7; // Mon=0
-  d.setUTCDate(d.getUTCDate() - day);
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
-}
 
 function scoped(scope: Prisma.TaskWhereInput, extra: Prisma.TaskWhereInput) {
   return { AND: [scope, extra] } satisfies Prisma.TaskWhereInput;
@@ -164,7 +156,7 @@ export async function globalStats(
     db.task.count({
       where: scoped(scope, {
         status: "COMPLETED",
-        completedAt: { gte: startOfWeekIST(new Date()) },
+        completedAt: { gte: startOfWeekIst() },
       }),
     }),
   ]);
@@ -172,7 +164,5 @@ export async function globalStats(
 }
 
 function startOfToday(): Date {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today;
+  return todayIst();
 }

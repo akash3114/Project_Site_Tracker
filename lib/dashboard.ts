@@ -36,11 +36,10 @@ export interface SpotlightTask {
     name: string;
     chainage?: string | null;
     lengthKm?: number | null;
-    state?: string | null;
     projectName: string;
   } | null;
   category?: { id: string; name: string } | null;
-  assignee: { name: string } | null;
+  assignees: Array<{ id?: string; name: string }>;
 }
 
 export interface DepartmentSummary {

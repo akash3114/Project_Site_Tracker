@@ -36,6 +36,56 @@ type AuditEvent = {
   };
 };
 
+type MasterAuditEvent = {
+  id: string;
+  entity: string;
+  entityId: string;
+  action: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+  actor: { id: string; name: string };
+};
+
+const ENTITY_LABELS: Record<string, string> = {
+  Company: "Company",
+  Project: "Project",
+  Plaza: "Plaza",
+  User: "User",
+  TaskCategory: "Category",
+  HeadOfficeMembership: "Head Office membership",
+  ProjectAssignment: "Project assignment",
+  PlazaAssignment: "Plaza access",
+};
+
+const ACTION_TONE: Record<string, string> = {
+  CREATE: "bg-[#E8F0DD] text-[#385A2B]",
+  UPDATE: "bg-[#E8EDF2] text-[#0E3A5D]",
+  ARCHIVE: "bg-[#F5F5EF] text-[#586760]",
+  GRANT: "bg-[#E3E8FF] text-[#3730A3]",
+  REVOKE: "bg-[#FBE8E4] text-[#8F2824]",
+};
+
+/** One-line summary of which fields changed, without dumping JSON. */
+function changedFields(event: MasterAuditEvent): string {
+  const before = event.before ?? {};
+  const after = event.after ?? {};
+  const keys = Array.from(
+    new Set([...Object.keys(before), ...Object.keys(after)]),
+  ).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  if (keys.length === 0) return event.entityId;
+  return keys
+    .map((key) => `${key}: ${formatValue(before[key])} → ${formatValue(after[key])}`)
+    .join(" · ");
+}
+
+function formatValue(value: unknown): string {
+  if (value === undefined || value === null) return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
 const TYPE_LABELS: Record<TaskActivityType, string> = {
   CREATED: "Created",
   COMMENT: "Comment",
@@ -100,6 +150,9 @@ function assigneeChange(event: AuditEvent): string | null {
 /** Read-only audit trail (T-040). No edit/delete controls by design. */
 export default function AuditPage() {
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
+  const [masterEvents, setMasterEvents] = useState<MasterAuditEvent[] | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -114,12 +167,24 @@ export default function AuditPage() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
+  useEffect(() => {
+    fetch("/api/audit?take=100", { credentials: "same-origin" })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const data = await r.json();
+        setMasterEvents(Array.isArray(data) ? data : (data.items ?? []));
+      })
+      .catch(() => {
+        // The task feed still renders if master-data audit is unavailable.
+      });
+  }, []);
+
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
       <PageHeader
         overline="Administration"
         title="Audit trail"
-        subtitle="Latest 100 task activities. Append-only — tasks and events can never be edited or deleted here."
+        subtitle="Latest 100 task activities and master-data changes. Append-only — nothing here can be edited or deleted."
       />
       {error ? (
         <p role="alert" className="rounded-md border border-[#F3C2C2] bg-[#FEF2F2] p-4 text-sm text-[#8F2824]">
@@ -181,6 +246,51 @@ export default function AuditPage() {
           })}
         </ol>
       )}
+
+      <section className="mt-4 flex flex-col gap-2" aria-label="Master data audit">
+        <div>
+          <h2 className="font-display text-lg font-semibold text-[#1C2824]">
+            Master data
+          </h2>
+          <p className="font-body text-sm text-[#586760]">
+            Latest 100 company, project, plaza, user, category and access
+            changes.
+          </p>
+        </div>
+        {masterEvents === null ? (
+          <p className="text-sm text-[#586760]">Loading…</p>
+        ) : masterEvents.length === 0 ? (
+          <p className="text-sm text-[#586760]">
+            No master-data changes recorded yet.
+          </p>
+        ) : (
+          <ol className="flex flex-col gap-2">
+            {masterEvents.map((e) => (
+              <li
+                key={e.id}
+                className="flex min-h-[44px] flex-col gap-2 rounded-[12px] border border-[#CDD6CE] bg-white px-3 py-2 text-sm"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded px-1.5 py-0.5 font-mono text-[11px] font-medium ${ACTION_TONE[e.action] ?? FALLBACK_TONE}`}
+                  >
+                    {e.action}
+                  </span>
+                  <span className="font-body font-medium text-[#1C2824]">
+                    {ENTITY_LABELS[e.entity] ?? e.entity}
+                  </span>
+                  <span className="ml-auto font-mono text-[11px] text-[#66756D]">
+                    {e.actor.name} · {fmtDateTimeIST(e.createdAt)}
+                  </span>
+                </div>
+                <p className="font-mono text-[11px] text-[#586760]">
+                  {changedFields(e)}
+                </p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
     </main>
   );
 }

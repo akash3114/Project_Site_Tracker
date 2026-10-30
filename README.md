@@ -54,7 +54,20 @@ Rotate the shared `Tracker@123` before handing logins out. Wipe-and-reseed with 
 
 ## Docs
 
-- `docs/DATABASE.md` — schema, ERD, permission matrix, reopen workflow (source of truth)
+Start at **`docs/README.md`** — the documentation index with a reading guide and
+a map of every diagram.
+
+- `docs/ARCHITECTURE.md` — context, containers, component map, request lifecycle, deployment topology
+- `docs/ERD.md` — full ERD, per-domain ERDs, cardinalities, constraints
+- `docs/SCHEMA.md` — column dictionary, enums, indexes, CHECKs, migration history
+- `docs/API.md` — endpoint reference: payloads, responses, errors, validation
+- `docs/ACCESS-CONTROL.md` — derived roles, visibility, capability matrix, assignment ceiling
+- `docs/SEQUENCES.md` — login, task lifecycle, reopen, upload and audit flows
+- `docs/OPERATIONS.md` — environments, env vars, migrations, seed, deploy, backup, incidents
+- `docs/DECISIONS.md` — ADRs explaining why the system is shaped this way
+- `docs/GLOSSARY.md` — domain terms and acronyms
+- `docs/DATABASE.md` — intended data design, hierarchy, permission model, seed profile
+- `docs/DATABASE-AUDIT.md` — 2026-10 database audit (historical + applied record)
 - `docs/master-data.md` — only company/project/plaza/people master-data source
 - `docs/DEPLOY.md` — VM deploy, includes the one-time baseline reset
 - `docs/BACKUP.md` — pg_dump backup + restore drill

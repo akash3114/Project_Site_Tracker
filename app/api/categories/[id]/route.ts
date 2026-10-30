@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { updateCategorySchema } from "@/lib/validations";
 
@@ -24,10 +25,21 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
   const exists = await db.taskCategory.findUnique({ where: { id: params.id } });
   if (!exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const updated = await db.taskCategory
-    .update({
-      where: { id: params.id },
-      data: parsed.data,
+  const updated = await db
+    .$transaction(async (tx) => {
+      const next = await tx.taskCategory.update({
+        where: { id: params.id },
+        data: parsed.data,
+      });
+      await logAudit(tx, {
+        actorId: user.id,
+        entity: "TaskCategory",
+        entityId: next.id,
+        action: parsed.data.active === false ? "ARCHIVE" : "UPDATE",
+        before: snapshot(exists, ["name", "active"]),
+        after: snapshot(next, ["name", "active"]),
+      });
+      return next;
     })
     .catch((e: unknown) => {
       if (

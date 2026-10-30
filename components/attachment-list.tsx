@@ -224,7 +224,7 @@ export function AttachmentList({
 }: {
   attachments: AttachmentItem[];
   currentUserId?: string | null;
-  /** permissions.canDelete (Admin). Uploaders may always delete their own. */
+  /** permissions.canAdminDelete (Admin). Uploaders may always delete their own. */
   canDeleteAny?: boolean;
   onChanged: () => void;
   onError: (message: string) => void;

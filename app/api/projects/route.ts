@@ -6,6 +6,7 @@ import {
   getSessionUser,
   taskScopeWhere,
 } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { projectStats } from "@/lib/stats";
 import { projectSchema } from "@/lib/validations";
@@ -77,19 +78,39 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Company not found" }, { status: 404 });
   }
 
-  const created = await db.project.create({
-    data: {
-      companyId: parsed.data.companyId,
-      name: parsed.data.name,
-      acronym: parsed.data.acronym ?? null,
-      round: parsed.data.round,
-      state: parsed.data.state ?? null,
-      lengthKm: parsed.data.lengthKm ?? null,
-      piu: parsed.data.piu ?? null,
-      ro: parsed.data.ro ?? null,
-      active: parsed.data.active ?? true,
-    },
-    include: { company: { select: { id: true, name: true, code: true } } },
+  const created = await db.$transaction(async (tx) => {
+    const project = await tx.project.create({
+      data: {
+        companyId: parsed.data.companyId,
+        name: parsed.data.name,
+        acronym: parsed.data.acronym ?? null,
+        round: parsed.data.round,
+        state: parsed.data.state ?? null,
+        lengthKm: parsed.data.lengthKm ?? null,
+        piu: parsed.data.piu ?? null,
+        ro: parsed.data.ro ?? null,
+        active: parsed.data.active ?? true,
+      },
+      include: { company: { select: { id: true, name: true, code: true } } },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "Project",
+      entityId: project.id,
+      action: "CREATE",
+      after: snapshot(project, [
+        "companyId",
+        "name",
+        "acronym",
+        "round",
+        "state",
+        "lengthKm",
+        "piu",
+        "ro",
+        "active",
+      ]),
+    });
+    return project;
   });
 
   return NextResponse.json(created, { status: 201 });

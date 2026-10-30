@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { canManageProjects, getSessionUser } from "@/lib/access";
+import { logAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import {
   headOfficeMembershipSchema,
@@ -110,7 +111,7 @@ export async function POST(req: Request): Promise<Response> {
         data: { isPrimary: false },
       });
     }
-    return tx.headOfficeMembership.upsert({
+    const membership = await tx.headOfficeMembership.upsert({
       where: { userId_departmentId: { userId, departmentId } },
       update: becomePrimary ? { isPrimary: true } : {},
       create: {
@@ -121,6 +122,14 @@ export async function POST(req: Request): Promise<Response> {
       },
       select: membershipSelect,
     });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "HeadOfficeMembership",
+      entityId: `${userId}:${departmentId}`,
+      action: "GRANT",
+      after: { userId, departmentId, isPrimary: membership.isPrimary },
+    });
+    return membership;
   });
 
   return NextResponse.json(membership, { status: 201 });
@@ -152,7 +161,7 @@ export async function PUT(req: Request): Promise<Response> {
   const { userId, departmentId, isPrimary } = parsed.data;
   const existing = await db.headOfficeMembership.findUnique({
     where: { userId_departmentId: { userId, departmentId } },
-    select: { userId: true },
+    select: { userId: true, isPrimary: true },
   });
   if (!existing) {
     return NextResponse.json(
@@ -162,6 +171,16 @@ export async function PUT(req: Request): Promise<Response> {
   }
 
   const result = await db.$transaction(async (tx) => {
+    const record = (membership: { isPrimary: boolean }) =>
+      logAudit(tx, {
+        actorId: user.id,
+        entity: "HeadOfficeMembership",
+        entityId: `${userId}:${departmentId}`,
+        action: "UPDATE",
+        before: { isPrimary: existing.isPrimary },
+        after: { isPrimary: membership.isPrimary },
+      });
+
     if (isPrimary) {
       await tx.headOfficeMembership.updateMany({
         where: { userId, isPrimary: true, departmentId: { not: departmentId } },
@@ -172,6 +191,7 @@ export async function PUT(req: Request): Promise<Response> {
         data: { isPrimary: true },
         select: membershipSelect,
       });
+      await record(membership);
       return { kind: "ok" as const, membership };
     }
 
@@ -186,6 +206,7 @@ export async function PUT(req: Request): Promise<Response> {
         data: { isPrimary: false },
         select: membershipSelect,
       });
+      await record(membership);
       return { kind: "ok" as const, membership };
     }
 
@@ -212,6 +233,7 @@ export async function PUT(req: Request): Promise<Response> {
       data: { isPrimary: false },
       select: membershipSelect,
     });
+    await record(membership);
     return { kind: "ok" as const, membership };
   });
 
@@ -264,6 +286,14 @@ export async function DELETE(req: Request): Promise<Response> {
 
     await tx.headOfficeMembership.delete({
       where: { userId_departmentId: { userId, departmentId } },
+    });
+
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "HeadOfficeMembership",
+      entityId: `${userId}:${departmentId}`,
+      action: "REVOKE",
+      before: { userId, departmentId, isPrimary: existing.isPrimary },
     });
 
     if (existing.isPrimary) {

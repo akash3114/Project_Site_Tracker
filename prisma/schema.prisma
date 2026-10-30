@@ -8,6 +8,18 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
+// Conventions
+//
+// * Generated rows use cuid(). Reference/catalogue rows (departments, offices,
+//   categories, companies) use stable slugs such as `dept_fin`, so every
+//   environment is identical. The seed owns catalogue ids; migrations do not
+//   insert them.
+// * Timestamps are `timestamptz(3)`; calendar dates are `date`.
+// * People are never deleted, so every user reference is `onDelete: Restrict`.
+// * Master data is archived with `active = false`, never deleted while in use.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // People and access
 //
 // There is no fixed account role. Access is derived from assignments:
@@ -34,19 +46,26 @@ model User {
   passwordHash String
   isAdmin      Boolean  @default(false)
   active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
 
   officeId String?
   office   Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
+
+  // Reporting line. Managers see, comment on and change the status of work
+  // owned by anyone below them, on top of the normal scope visibility.
+  managerId String?
+  manager   User?   @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports   User[]  @relation("UserManager")
 
   headOfficeMemberships HeadOfficeMembership[]
   projectAssignments    ProjectAssignment[]
   plazaAssignments      PlazaAssignment[]
 
-  assignedTasks  Task[] @relation("Assignee")
-  createdTasks   Task[] @relation("Creator")
-  completedTasks Task[] @relation("Completer")
+  taskAssignments     TaskAssignee[] @relation("TaskAssigneeUser")
+  taskAssignmentsMade TaskAssignee[] @relation("TaskAssigneeAssigner")
+  createdTasks        Task[]         @relation("Creator")
+  completedTasks      Task[]         @relation("Completer")
 
   activities TaskActivity[] @relation("ActivityActor")
 
@@ -58,8 +77,11 @@ model User {
 
   attachments TaskAttachment[]
 
+  auditLogs AuditLog[]
+
   @@index([isAdmin])
-  @@index([active])
+  @@index([active, name])
+  @@index([managerId])
 }
 
 model Company {
@@ -67,12 +89,12 @@ model Company {
   name      String   @unique
   code      String   @unique
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   projects Project[]
 
-  @@index([active])
+  @@index([active, name])
 }
 
 // ---------------------------------------------------------------------------
@@ -90,13 +112,13 @@ model Department {
   code      String   @unique // "FIN"
   sortOrder Int      @default(0) // Sr.No. from the source list
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   members HeadOfficeMembership[]
   tasks   Task[]
 
-  @@index([active])
+  @@index([active, sortOrder])
 }
 
 model Office {
@@ -104,7 +126,8 @@ model Office {
   name      String   @unique // "Delhi"
   city      String?
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   users User[]
 }
@@ -114,7 +137,7 @@ model HeadOfficeMembership {
   departmentId String
   isPrimary    Boolean  @default(false)
   assignedById String?
-  assignedAt   DateTime @default(now())
+  assignedAt   DateTime @default(now()) @db.Timestamptz(3)
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
@@ -136,17 +159,16 @@ model Project {
   ro        String?
   // Soft archive only. Projects never complete.
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   plazas      Plaza[]
   assignments ProjectAssignment[]
   tasks       Task[]
 
   @@unique([companyId, name])
-  @@index([companyId])
+  @@index([companyId, active, round])
   @@index([round])
-  @@index([active])
   @@index([acronym])
 }
 
@@ -162,21 +184,19 @@ model Plaza {
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
   name      String
-  state     String?
-  piu       String?
-  ro        String?
+  // Location metadata (state, PIU, RO) lives on the project; only the plaza
+  // bracket length is plaza-specific.
   lengthKm  Float?
   // Soft archive only. Plazas never complete.
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   assignments PlazaAssignment[]
   tasks       Task[]
 
   @@unique([projectId, name])
-  @@index([projectId])
-  @@index([active])
+  @@index([projectId, active])
 }
 
 model ProjectAssignment {
@@ -184,7 +204,7 @@ model ProjectAssignment {
   userId       String
   isPrimary    Boolean  @default(false)
   assignedById String?
-  assignedAt   DateTime @default(now())
+  assignedAt   DateTime @default(now()) @db.Timestamptz(3)
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -200,7 +220,7 @@ model PlazaAssignment {
   role         PlazaRole
   isPrimary    Boolean   @default(false)
   assignedById String?
-  assignedAt   DateTime  @default(now())
+  assignedAt   DateTime  @default(now()) @db.Timestamptz(3)
 
   plaza Plaza @relation(fields: [plazaId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -224,19 +244,20 @@ model TaskCategory {
   id        String   @id @default(cuid())
   name      String   @unique
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   tasks Task[]
 
-  @@index([active])
+  @@index([active, name])
 }
 
 model Task {
   id            String        @id @default(cuid())
-  // A task belongs to exactly one scope: a project (optionally a plaza) or
-  // Head Office (optionally a department). The CHECK constraints live in the
-  // migration because Prisma cannot express them.
+  // A task belongs to exactly one scope. `scope` is the discriminator; the
+  // matching column(s) are enforced by a CHECK constraint in the migration
+  // because Prisma cannot express it.
+  scope         TaskScopeKind
   projectId     String?
   project       Project?      @relation(fields: [projectId], references: [id], onDelete: Restrict)
   plazaId       String?
@@ -249,28 +270,47 @@ model Task {
   description   String?
   status        TaskStatus    @default(TODO)
   priority      Priority      @default(MEDIUM)
-  assigneeId    String?
-  assignee      User?         @relation("Assignee", fields: [assigneeId], references: [id])
   createdById   String
-  createdBy     User          @relation("Creator", fields: [createdById], references: [id])
+  createdBy     User          @relation("Creator", fields: [createdById], references: [id], onDelete: Restrict)
   dueDate       DateTime?     @db.Date
-  completedAt   DateTime?
+  completedAt   DateTime?     @db.Timestamptz(3)
   completedById String?
-  completedBy   User?         @relation("Completer", fields: [completedById], references: [id])
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  completedBy   User?         @relation("Completer", fields: [completedById], references: [id], onDelete: Restrict)
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(3)
 
+  assignees      TaskAssignee[]
   activities     TaskActivity[]
   attachments    TaskAttachment[]
   reopenRequests TaskReopenRequest[]
 
-  @@index([projectId, status])
-  @@index([plazaId, status])
-  @@index([departmentId, status])
-  @@index([assigneeId])
+  @@index([projectId, status, dueDate])
+  @@index([plazaId, status, dueDate])
+  @@index([departmentId, status, dueDate])
+  @@index([scope, status, dueDate])
   @@index([categoryId])
   @@index([dueDate])
   @@index([status])
+  @@index([createdById])
+  @@index([completedById])
+  @@index([updatedAt])
+}
+
+// Many-to-many task ownership. Every assignee has the same rights: the task is
+// visible on their board and any of them may move its status or comment.
+// The creator and anyone above the assignees (role or reporting line) keep
+// their own rights.
+model TaskAssignee {
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation("TaskAssigneeUser", fields: [userId], references: [id], onDelete: Restrict)
+  assignedById String?
+  assignedBy   User?    @relation("TaskAssigneeAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([taskId, userId])
+  @@index([userId, taskId])
 }
 
 enum TaskStatus {
@@ -278,6 +318,13 @@ enum TaskStatus {
   IN_PROGRESS
   BLOCKED
   COMPLETED
+}
+
+enum TaskScopeKind {
+  PROJECT
+  PLAZA
+  DEPARTMENT
+  HEAD_OFFICE
 }
 
 enum Priority {
@@ -293,16 +340,16 @@ model TaskActivity {
   taskId         String
   task           Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
   actorId        String
-  actor          User             @relation("ActivityActor", fields: [actorId], references: [id])
+  actor          User             @relation("ActivityActor", fields: [actorId], references: [id], onDelete: Restrict)
   type           TaskActivityType
   fromStatus     TaskStatus?
   toStatus       TaskStatus?
   fromAssigneeId String?
-  fromAssignee   User?            @relation("ActivityFromAssignee", fields: [fromAssigneeId], references: [id])
+  fromAssignee   User?            @relation("ActivityFromAssignee", fields: [fromAssigneeId], references: [id], onDelete: Restrict)
   toAssigneeId   String?
-  toAssignee     User?            @relation("ActivityToAssignee", fields: [toAssigneeId], references: [id])
+  toAssignee     User?            @relation("ActivityToAssignee", fields: [toAssigneeId], references: [id], onDelete: Restrict)
   text           String?
-  createdAt      DateTime         @default(now())
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
 
   attachments TaskAttachment[]
 
@@ -332,12 +379,12 @@ model TaskAttachment {
   activityId   String?
   activity     TaskActivity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
   uploadedById String
-  uploadedBy   User          @relation(fields: [uploadedById], references: [id])
+  uploadedBy   User          @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
   fileName     String
   storedName   String        @unique
   mimeType     String
   sizeBytes    Int
-  createdAt    DateTime      @default(now())
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
 
   @@index([taskId])
   @@index([activityId])
@@ -348,14 +395,14 @@ model TaskReopenRequest {
   taskId        String
   task          Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
   requestedById String
-  requestedBy   User                @relation("ReopenRequester", fields: [requestedById], references: [id])
+  requestedBy   User                @relation("ReopenRequester", fields: [requestedById], references: [id], onDelete: Restrict)
   reviewedById  String?
-  reviewedBy    User?               @relation("ReopenReviewer", fields: [reviewedById], references: [id])
+  reviewedBy    User?               @relation("ReopenReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
   status        ReopenRequestStatus @default(PENDING)
   reason        String
   reviewNote    String?
-  createdAt     DateTime            @default(now())
-  reviewedAt    DateTime?
+  createdAt     DateTime            @default(now()) @db.Timestamptz(3)
+  reviewedAt    DateTime?           @db.Timestamptz(3)
 
   @@index([taskId, status])
   @@index([requestedById])
@@ -367,4 +414,33 @@ enum ReopenRequestStatus {
   APPROVED
   REJECTED
   CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// Master-data audit
+//
+// Task history lives in TaskActivity (the feed and the task audit trail are the
+// same stream). Every other master-data mutation — companies, projects,
+// plazas, users, categories, assignments — is recorded here, one row per
+// change, with a before/after snapshot. Append-only: no update or delete API.
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  // Logical table name, e.g. "Company", "Project", "Plaza", "User",
+  // "TaskCategory", "HeadOfficeMembership", "ProjectAssignment",
+  // "PlazaAssignment".
+  entity    String
+  entityId  String
+  // CREATE | UPDATE | ARCHIVE | GRANT | REVOKE
+  action    String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([entity, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
 }

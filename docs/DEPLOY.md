@@ -55,6 +55,8 @@ curl -k https://tracker.internal/api/health
 ## Checks
 - `docker ps` — `tracker-db`, `tracker-app`, `tracker-caddy` Up (db healthy); `tracker-migrate` has exited 0
 - `docker compose -f docker/compose.yml logs migrate` — migration output
+- `docker compose -f docker/compose.yml run --rm migrate npx prisma migrate status` — every migration applied, no drift (run after an update)
+- Admin → Audit trail — task history (`TaskActivity`) plus the master-data log (`AuditLog`) render; both are append-only
 - `docker compose -f docker/compose.yml logs -f app` — auth/seed errors surface here
 - `GET /api/health` — 200, no auth, no DB ping (Caddy/uptime safe)
 

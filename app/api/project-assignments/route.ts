@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { canManageProjects, getSessionUser } from "@/lib/access";
+import { logAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { projectAssignmentSchema } from "@/lib/validations";
 
@@ -67,20 +68,34 @@ export async function POST(req: Request): Promise<Response> {
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const created = await db.projectAssignment.upsert({
-    where: {
-      projectId_userId: {
+  const created = await db.$transaction(async (tx) => {
+    const assignment = await tx.projectAssignment.upsert({
+      where: {
+        projectId_userId: {
+          projectId: parsed.data.projectId,
+          userId: parsed.data.userId,
+        },
+      },
+      update: { isPrimary: parsed.data.isPrimary },
+      create: {
         projectId: parsed.data.projectId,
         userId: parsed.data.userId,
+        isPrimary: parsed.data.isPrimary,
+        assignedById: user.id,
       },
-    },
-    update: { isPrimary: parsed.data.isPrimary },
-    create: {
-      projectId: parsed.data.projectId,
-      userId: parsed.data.userId,
-      isPrimary: parsed.data.isPrimary,
-      assignedById: user.id,
-    },
+    });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "ProjectAssignment",
+      entityId: `${assignment.projectId}:${assignment.userId}`,
+      action: "GRANT",
+      after: {
+        projectId: assignment.projectId,
+        userId: assignment.userId,
+        isPrimary: assignment.isPrimary,
+      },
+    });
+    return assignment;
   });
 
   return NextResponse.json(created, { status: 201 });
@@ -103,6 +118,19 @@ export async function DELETE(req: Request): Promise<Response> {
     );
   }
 
-  await db.projectAssignment.deleteMany({ where: { projectId, userId } });
+  await db.$transaction(async (tx) => {
+    const existing = await tx.projectAssignment.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { isPrimary: true },
+    });
+    await tx.projectAssignment.deleteMany({ where: { projectId, userId } });
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "ProjectAssignment",
+      entityId: `${projectId}:${userId}`,
+      action: "REVOKE",
+      before: { projectId, userId, isPrimary: existing?.isPrimary ?? false },
+    });
+  });
   return NextResponse.json({ ok: true });
 }

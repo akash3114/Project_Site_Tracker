@@ -5,6 +5,11 @@ Hierarchy: **Company → Project → Plaza**, with access granted by assignment:
 `HeadOfficeMembership (HEAD_OFFICE)` / `ProjectAssignment (Project Manager)` /
 `PlazaAssignment (TOLL | MAINTENANCE | CORRIDOR)`.
 
+Companions: [`ERD.md`](./ERD.md) (relationship diagrams and cardinality),
+[`SCHEMA.md`](./SCHEMA.md) (column-level data dictionary), and
+[`DATABASE-AUDIT.md`](./DATABASE-AUDIT.md) (cleanup findings and applied
+changes).
+
 There is no account-level role column. `User.isAdmin` is the only account flag;
 everything else is derived from the assignment rows a person holds. Head Office
 is one **global** grant: a department membership is not scoped to a company.
@@ -28,12 +33,16 @@ erDiagram
     users ||--o{ head_office_memberships : "HEAD_OFFICE"
     users ||--o{ project_assignments : "project manager"
     users ||--o{ plaza_assignments : "Toll/Maint/Corridor"
-    users ||--o{ tasks : "assignee"
+    users ||--o{ users : "reports to (managerId)"
+    tasks ||--o{ task_assignees : "has"
+    users ||--o{ task_assignees : "assignee"
+    users ||--o{ task_assignees : "assigned by"
     users ||--o{ tasks : "creator"
     tasks ||--o{ task_activities : "append-only feed"
     tasks ||--o{ task_attachments : "files"
     tasks ||--o{ task_reopen_requests : "reopen workflow"
     task_activities ||--o{ task_attachments : "optional link"
+    users ||--o{ audit_logs : "master-data actor"
 
     users {
         string id PK
@@ -45,6 +54,7 @@ erDiagram
         boolean isAdmin "platform admin flag"
         boolean active
         string officeId FK "nullable"
+        string managerId FK "nullable, self-reference"
     }
     companies {
         string id PK
@@ -68,10 +78,7 @@ erDiagram
         string id PK
         string projectId FK
         string name "UK per project"
-        string state "nullable free text"
-        float lengthKm "nullable"
-        string piu "nullable"
-        string ro "nullable"
+        float lengthKm "nullable; project.state/piu/ro are authoritative"
         boolean active "soft archive only"
     }
     offices {
@@ -116,19 +123,35 @@ erDiagram
     }
     tasks {
         string id PK
-        string projectId FK "nullable; null = Head Office scope"
-        string plazaId FK "nullable = project-level task"
-        string departmentId FK "nullable; Head Office scope only"
+        TaskScopeKind scope "PROJECT | PLAZA | DEPARTMENT | HEAD_OFFICE"
+        string projectId FK "nullable; set for PROJECT/PLAZA"
+        string plazaId FK "nullable; set for PLAZA only"
+        string departmentId FK "nullable; set for DEPARTMENT only"
         string categoryId FK "nullable"
         string title
         string description "nullable"
         TaskStatus status
         Priority priority "LOW | MEDIUM | HIGH"
-        string assigneeId "nullable"
         string createdById FK
         date dueDate "nullable"
         datetime completedAt "nullable"
         string completedById "nullable"
+    }
+    task_assignees {
+        string taskId FK_PK
+        string userId FK_PK
+        string assignedById FK "nullable"
+        datetime assignedAt
+    }
+    audit_logs {
+        string id PK
+        string actorId FK
+        string entity "Company | Project | Plaza | User | ..."
+        string entityId
+        string action "CREATE | UPDATE | ARCHIVE | GRANT | REVOKE"
+        json before "nullable"
+        json after "nullable"
+        datetime createdAt
     }
     task_activities {
         string id PK
@@ -173,9 +196,12 @@ erDiagram
 * **User** — login identity (`email` unique), display name, optional phone,
   optional `title` (job title shown in assignee pickers, e.g. `Operations
   Manager`; falls back to the derived role label), bcrypt `passwordHash`,
-  `isAdmin`, `active`, and a nullable `officeId` (the office the person sits
-  in). Deactivating sets `active=false`; users are never deleted, so task
-  history keeps its actor/assignee joins.
+  `isAdmin`, `active`, a nullable `officeId` (the office the person sits
+  in), and a nullable `managerId` self-reference (the reporting line). The
+  reporting line is not a scope grant: it widens visibility and status rights
+  for the person above, but adds no project or plaza assignment. Deactivating
+  sets `active=false`; users are never deleted, so task history keeps its
+  actor/assignee joins.
 * **Company** — `name` and `code` are unique; `active` soft-archives.
 * **Department** — global Head Office catalogue shared by every company:
   `name` and `code` are unique, `sortOrder` drives display order, `active`
@@ -194,38 +220,46 @@ erDiagram
   `@@unique([companyId, name])` makes the name canonical within a company.
   `acronym` is nullable, non-unique, indexed, and used for display/search only —
   the same acronym can appear on different projects, and continuation projects
-  may have none. `active=false` means archived; projects are never completed
-  and have no separate lifecycle status.
+  may have none. `state`, `piu`, `ro` and `lengthKm` are the authoritative
+  location metadata for the project. `active=false` means archived; projects are
+  never completed and have no separate lifecycle status.
 * **ProjectAssignment** — `@@id([projectId, userId])`; a project manager sees
-  every plaza and task in that project. `isPrimary` marks the lead PM (one per
-  project by convention; not a DB constraint).
-* **Plaza** — belongs to one project; `@@unique([projectId, name])`. Location
-  fields (`state`, `piu`, `ro`, `lengthKm`) are nullable free text/numeric on the
-  plaza. `active=false` archives it.
+  every plaza and task in that project. `isPrimary` marks the lead PM, backed by
+  a partial unique index (`ProjectAssignment_projectId_primary_key`).
+* **Plaza** — belongs to one project; `@@unique([projectId, name])`. Only the
+  plaza bracket `lengthKm` is plaza-specific; state/PIU/RO are read through
+  `plaza.project`. `active=false` archives it.
 * **PlazaAssignment** — `@@id([plazaId, userId, role])`; a person can hold
   several job titles on the same plaza and several plazas at once.
-  `isPrimary` marks the lead for each `plazaId + role` by convention.
+  `isPrimary` marks the lead for each `plazaId + role`, backed by a partial
+  unique index (`PlazaAssignment_plazaId_role_primary_key`).
 
 ### Task domain
 
 * **TaskCategory** — admin-managed lookup (`name` unique, `active`). Tasks keep
   `categoryId` nullable; deleting a category sets it to `null` (`SetNull`).
-* **Task** — exactly one **scope**: a project (optionally narrowed to one of
-  its plazas) **or** Head Office (optionally narrowed to one department).
-  `projectId`, `plazaId` and `departmentId` are all nullable, and two CHECK
-  constraints keep the combinations honest:
+* **Task** — exactly one **scope**, recorded by the `Task.scope`
+  discriminator: a project, one of its plazas, a Head Office department, or
+  Head Office level. A single CHECK constraint
+  (`Task_scope_kind_check`) enforces the column combinations:
 
-  | `projectId` | `plazaId` | `departmentId` | Meaning |
-  |---|---|---|---|
-  | set | null | null | Project-level task |
-  | set | set | null | Plaza task (plaza must belong to the project) |
-  | null | null | set | Department task (Head Office) |
-  | null | null | null | Head Office-level task |
+  | `scope` | `projectId` | `plazaId` | `departmentId` | Meaning |
+  |---|---|---|---|---|
+  | `PROJECT` | set | null | null | Project-level task |
+  | `PLAZA` | set | set | null | Plaza task (plaza must belong to the project) |
+  | `DEPARTMENT` | null | null | set | Department task (Head Office) |
+  | `HEAD_OFFICE` | null | null | null | Head Office-level task |
 
-  `status` starts at `TODO`; `assigneeId` is optional (one assignee per task);
-  `dueDate` is a date; `completedAt` / `completedById` record completion.
+  `status` starts at `TODO`; the assignee set is a many-to-many relation through
+  `TaskAssignee` (any number of equal assignees, at most 20 per task through the
+  API); `dueDate` is a date; `completedAt` / `completedById` record completion.
   Deleting a project/plaza/department with tasks is blocked
   (`onDelete: Restrict`) — archive the project/plaza instead.
+* **TaskAssignee** — join row `@@id([taskId, userId])` with an optional
+  `assignedById` and `assignedAt`. Every assignee has the same rights: the task
+  appears on each of their boards, and any of them may comment or change status.
+  The API replaces the whole set (`{ assigneeIds: [] }`) in one transaction and
+  writes one `ASSIGNED` activity per person added or removed.
 * **TaskActivity** — immutable, append-only history and comments in one stream.
   A comment is simply `type = COMMENT` with `text`. Rows record the actor,
   optional status transition (`fromStatus` → `toStatus`), optional assignee
@@ -245,12 +279,26 @@ erDiagram
     ON "TaskReopenRequest"("taskId") WHERE "status" = 'PENDING';
   ```
 
+### Audit
+
+* **AuditLog** — append-only master-data trail: one row per mutation of a
+  company, project, plaza, user, category, Head Office membership, project
+  assignment or plaza role set. `entity` + `entityId` identify the row,
+  `action` is `CREATE` / `UPDATE` / `ARCHIVE` / `GRANT` / `REVOKE`, and
+  `before` / `after` hold JSON snapshots. `actorId` is `Restrict` (users are
+  never deleted). There is no update/delete API; read it with
+  `GET /api/audit` (Admin/Head Office). Task history stays in `TaskActivity` —
+  the task feed and the task audit trail are the same stream. User snapshots
+  never include `passwordHash`; a password reset records
+  `passwordChanged: true`.
+
 ## Enums
 
 | Enum | Values |
 |---|---|
 | `PlazaRole` | `TOLL`, `MAINTENANCE`, `CORRIDOR` |
 | `Round` | `ROUND_1`, `ROUND_2`, `ROUND_3`, `ROUND_4` |
+| `TaskScopeKind` | `PROJECT`, `PLAZA`, `DEPARTMENT`, `HEAD_OFFICE` |
 | `TaskStatus` | `TODO`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED` |
 | `Priority` | `LOW`, `MEDIUM`, `HIGH` (three values only) |
 | `TaskActivityType` | `CREATED`, `COMMENT`, `ASSIGNED`, `STATUS_CHANGED`, `REOPEN_REQUESTED`, `REOPEN_APPROVED`, `REOPEN_REJECTED`, `REOPEN_CANCELLED`, `REOPENED`, `ATTACHMENT`, `UPDATED` |
@@ -260,8 +308,7 @@ erDiagram
 
 | Rule | Enforced by |
 |---|---|
-| A task is never both project-scoped and department-scoped | `CHECK "Task_scope_at_most_one"` |
-| A plaza task always carries its project | `CHECK "Task_plaza_requires_project"` |
+| A task's scope discriminator matches its location columns | `CHECK "Task_scope_kind_check"` |
 | Company deletion is blocked while projects exist | `Project.company` → `onDelete: Restrict` |
 | Project deletion is blocked while plazas or tasks exist | `Plaza.project`, `Task.project` → `Restrict` |
 | Plaza deletion is blocked while tasks exist | `Task.plaza` → `Restrict` |
@@ -270,12 +317,18 @@ erDiagram
 | Project/plaza assignments vanish with their user/project/plaza | assignment relations → `Cascade` |
 | Deleting an office keeps its people and clears their office | `User.office` → `SetNull` |
 | Exactly one primary department per person with memberships | `POST`/`PUT`/`DELETE` + partial unique index `HeadOfficeMembership_userId_primary_key` |
+| One primary project manager per project | partial unique index `ProjectAssignment_projectId_primary_key` |
+| One primary holder per plaza + role | partial unique index `PlazaAssignment_plazaId_role_primary_key` |
 | Task history/attachments/reopen rows vanish only with the task | `Task` children → `Cascade` |
+| Assignments vanish with the task; people cannot be deleted while assigned | `TaskAssignee.task` → `Cascade`; `TaskAssignee.user` → `Restrict` |
+| Clearing a manager keeps the person | `User.manager` → `SetNull` |
 | Deleting a category keeps tasks | `Task.category` → `SetNull` |
 | One pending reopen request per task | partial unique index shown above |
 | Project names unique per company; plaza names unique per project | `@@unique([companyId, name])`, `@@unique([projectId, name])` |
+| Email is unique case-insensitively | exact unique index + `User_email_lower_key` on `lower(email)` |
+| Audit rows are never deleted with their actor | `AuditLog.actor` → `onDelete: Restrict` |
 | Archived, not completed | `Project.active` / `Plaza.active` booleans only |
-| No account role column | access derived from `isAdmin` + assignment rows |
+| No account role column | access derived from `isAdmin` + assignment rows + the reporting line |
 
 The Head Office primary rule is hand-written in the migration because Prisma
 cannot express a partial unique index:
@@ -306,13 +359,18 @@ project/plaza assignments, or no access); an Admin can always re-grant it.
 | Companies | all | all | via visible projects | via visible plazas |
 | Projects | all | all | assigned projects | projects with an assigned plaza |
 | Plazas | all | all | all plazas in assigned projects | assigned plazas only |
-| Tasks | all | all | all tasks in assigned projects (incl. project-level) + Head Office tasks assigned to them | tasks in assigned plazas + project-level and Head Office tasks assigned to them |
+| Tasks | all | all | all tasks in assigned projects (incl. project-level), Head Office tasks assigned to them, plus tasks assigned to or created by their downline | tasks in assigned plazas, project-level and Head Office tasks assigned to them, plus tasks assigned to or created by their downline |
 
 * Head Office is global by design: one department membership grants every
   company, project, plaza and task. Departments and offices never narrow access.
+* The reporting line is additive: `taskScopeWhere` also includes tasks assigned
+  to or created by anyone below the caller, at any depth. It does not narrow or
+  replace the scope clauses.
 * A site manager assigned a **project-level task** can read/act on that task even
   without a plaza on that project, but the project/plaza pages still require a
   project or plaza assignment (`requireProjectAccess` / `requirePlazaAccess`).
+  Those helpers also include downline work, so a manager can open the page that
+  contains a junior's task.
 * `GET /api/projects`, `/api/plazas` and `/api/tasks` all apply the same
   `accessibleProjectIds` / `accessiblePlazaIds` / `taskScopeWhere` scope.
 
@@ -326,9 +384,14 @@ Site Manager** (`effectiveTaskRole`):
 3. `ProjectAssignment` on the task's project → `PROJECT_MANAGER`.
 4. `PlazaAssignment` on the task's plaza → `SITE_MANAGER`.
 5. Head Office task (`departmentId != null` or `projectId == null`) →
-   `SITE_MANAGER` only when `assigneeId === user.id`, else `null`.
-6. No plaza on a project task and `assigneeId === user.id` → `SITE_MANAGER`
-   (the project-level fallback).
+   `SITE_MANAGER` when the caller is an assignee, the creator, or a manager above
+   either, else `null`.
+6. No plaza on a project task and the caller is an assignee, the creator, or a
+   manager above either → `SITE_MANAGER` (the project-level fallback).
+
+A manager-only observer (reporting-line ancestor, no scope role) resolves to
+`SITE_MANAGER` with `scopeRole: null`. That grants view, comment and status
+rights, but not core edits or reassignment.
 
 The derived display role for navigation uses `isAdmin ? ADMIN :
 headOfficeMemberships.length > 0 ? HEAD_OFFICE : PROJECT_MANAGER`; the header
@@ -346,7 +409,7 @@ metadata only — they do not change any role, capability or approval.
 | Manage Head Office memberships and project/plaza assignments | yes | yes | no | no |
 | Create tasks | any project, plaza, department or Head Office level | any project, plaza, department or Head Office level | assigned projects (project or plaza scope) | assigned plazas only (plaza scope) |
 | Edit task core fields | any task | any task | tasks in assigned projects | only tasks they created |
-| Change status / comment / attach | any task | any task | assigned projects | assigned plazas + assigned project-level tasks |
+| Change status / comment / attach | any task | any task | assigned projects | assignees, creators, managers above, plus plaza tasks they can see (a same-plaza peer who is none of these can comment but not change status) |
 | View audit trail | yes | yes | no | no |
 | Delete a project | yes | no | no | no |
 | Reopen a completed task directly | yes | yes | no | no |
@@ -355,7 +418,9 @@ metadata only — they do not change any role, capability or approval.
 
 ### Assignment ceiling
 
-`canAssignTo` / `assigneeCandidates` cap who a user may assign:
+`canAssignTo` / `assigneeCandidates` cap who a user may assign. The endpoint is
+a replace-set: `POST /api/tasks/:id/assign` takes the complete `assigneeIds`
+array (up to 20, de-duplicated); every id is checked independently.
 
 | Actor role | May assign |
 |---|---|
@@ -364,10 +429,10 @@ metadata only — they do not change any role, capability or approval.
 | Site Manager | the project manager or site managers on the same plaza — never Admin/Head Office |
 
 Assignees must be active. Completed tasks lock assignment changes
-(`taskPermissions.canAssign` is false). **Head Office tasks** (department or
-Head Office level) are stricter: only Admin/Head Office may (re)assign them,
-whatever the task creator's role; a PM or site manager may be the assignee but
-cannot change it.
+(`taskPermissions.canAssign` is false), and a manager-only observer cannot
+reassign. **Head Office tasks** (department or Head Office level) are stricter:
+only Admin/Head Office may (re)assign them, whatever the task creator's role; a
+PM or site manager may be the assignee but cannot change it.
 
 ### Task scopes and batch creation
 
@@ -383,7 +448,8 @@ The assignee picker offers only users associated with the scope — department
 membership for a department or Head Office-level task, project assignment for a
 project, plaza assignment for a plaza — plus the current user. That list is
 guidance, not the permission boundary: the assignment ceiling (`canAssignTo`)
-still validates every assignment on the API independently.
+still validates every assignment on the API independently. The picker is
+multi-select; choosing nobody clears the set.
 
 ### Completed-task lock and reopen workflow
 
@@ -424,7 +490,8 @@ Fresh seed profile (`SEED_RESET=1` wipes in FK-safe order first):
   in `scripts/parse-master-data.mjs` and stored on `Company.code`.
 * **28 projects**, **46 plazas** (plaza lengths come from the bracket values in
   the master data; project `lengthKm`/`piu`/`ro` stay blank because plaza
-  brackets are authoritative).
+  brackets are authoritative). Plaza state/PIU/RO are not stored: the project
+  is the single source of truth for location metadata.
 * **18 Head Office departments** and **2 offices** (`Delhi`, `Mumbai`):
   * `ADMIN` Admin, `BMS` BMS, `EHS` EHS, `FIN` Finance & Accounts,
     `HR-LD` HR - Learning & Development, `HR-COMP` HR-Compliance,
@@ -443,20 +510,26 @@ Fresh seed profile (`SEED_RESET=1` wipes in FK-safe order first):
 * **20 Head Office memberships**: `management@tracker.local` holds two
   (`SEC` primary + `FIN`) and each department lead holds one (`isPrimary`).
   There is no per-company Head Office row.
-* **6 task categories** and **47 demo tasks**: 35 plaza tasks + 6 project-level
-  tasks (`plazaId = null`) + 6 department tasks, with 18 `TODO`, 12
-  `IN_PROGRESS`, 6 `BLOCKED`, and 11 `COMPLETED`; `priority` cycles through
-  `MEDIUM`, `HIGH`, `LOW`. The department tasks cover Operations (2), Finance &
-  Accounts (2) and IT (2). The seed writes **138 activities** (`CREATED`,
-  `ASSIGNED`, `STATUS_CHANGED`, comments) and one `PENDING` reopen request on a
-  completed task so the approval flow is visible immediately.
+* **6 task categories** and **47 demo tasks**: 35 plaza tasks (`scope=PLAZA`) +
+  6 project-level tasks (`scope=PROJECT`, `plazaId = null`) + 6 department tasks
+  (`scope=DEPARTMENT`), with 18 `TODO`, 12 `IN_PROGRESS`, 6 `BLOCKED`, and 11
+  `COMPLETED`; `priority` cycles through `MEDIUM`, `HIGH`, `LOW`. The department
+  tasks cover Operations (2), Finance & Accounts (2) and IT (2). The seed writes
+  **138 activities** (`CREATED`, `ASSIGNED`, `STATUS_CHANGED`, comments) and one
+  `PENDING` reopen request on a completed task so the approval flow is visible
+  immediately.
 * PM/site access comes from generated project and plaza assignments; Head Office
   access comes solely from the department memberships above.
+* **Reference ids are stable slugs**, not cuids: companies `company_neppl` /
+  `company_nsppl` / `company_nwppl`, departments `dept_<code>` (e.g.
+  `dept_fin`, `dept_hr-ld`), offices `office_delhi` / `office_mumbai`,
+  categories `cat_<name>` (e.g. `cat_toll_operations`). Projects, plazas, users,
+  tasks and assignments keep generated cuids.
 
 The `20261023000000_head_office_departments` migration backfilled former Head
 Office users into the `Admin` department (primary, Delhi office) and kept the old
-rows in `_CompanyAssignment_backup` (3 rows) for the pilot; a later migration
-drops that backup table.
+rows in `_CompanyAssignment_backup` (3 rows) for the pilot;
+`20261029000000_integrity` drops that backup table.
 
 ### Logins
 

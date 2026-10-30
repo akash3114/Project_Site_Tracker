@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 
 import { getSessionUser } from "@/lib/access";
+import { logAudit, snapshot } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { managerCycleError } from "@/lib/reporting";
 import { updateUserSchema } from "@/lib/validations";
 
 type Ctx = { params: { id: string } };
@@ -29,37 +31,74 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<Response> {
     );
   }
 
-  const updated = await db.user.update({
-    where: { id: params.id },
-    data: {
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.phone !== undefined
-        ? { phone: parsed.data.phone }
-        : {}),
-      ...(parsed.data.title !== undefined
-        ? { title: parsed.data.title?.trim() || null }
-        : {}),
-      ...(parsed.data.isAdmin !== undefined
-        ? { isAdmin: parsed.data.isAdmin }
-        : {}),
-      ...(parsed.data.active !== undefined
-        ? { active: parsed.data.active }
-        : {}),
-      ...(parsed.data.password !== undefined
-        ? { passwordHash: await bcrypt.hash(parsed.data.password, 12) }
-        : {}),
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      title: true,
-      isAdmin: true,
-      active: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  if (parsed.data.managerId !== undefined) {
+    const cycleError = await managerCycleError(
+      params.id,
+      parsed.data.managerId,
+    );
+    if (cycleError) {
+      return NextResponse.json({ error: cycleError }, { status: 422 });
+    }
+  }
+
+  const updated = await db.$transaction(async (tx) => {
+    const next = await tx.user.update({
+      where: { id: params.id },
+      data: {
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.phone !== undefined
+          ? { phone: parsed.data.phone }
+          : {}),
+        ...(parsed.data.title !== undefined
+          ? { title: parsed.data.title?.trim() || null }
+          : {}),
+        ...(parsed.data.isAdmin !== undefined
+          ? { isAdmin: parsed.data.isAdmin }
+          : {}),
+        ...(parsed.data.active !== undefined
+          ? { active: parsed.data.active }
+          : {}),
+        ...(parsed.data.managerId !== undefined
+          ? { managerId: parsed.data.managerId }
+          : {}),
+        ...(parsed.data.password !== undefined
+          ? { passwordHash: await bcrypt.hash(parsed.data.password, 12) }
+          : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        title: true,
+        isAdmin: true,
+        active: true,
+        managerId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    const keys = [
+      "name",
+      "email",
+      "phone",
+      "title",
+      "isAdmin",
+      "active",
+      "managerId",
+    ];
+    await logAudit(tx, {
+      actorId: user.id,
+      entity: "User",
+      entityId: next.id,
+      action: parsed.data.active === false ? "ARCHIVE" : "UPDATE",
+      before: snapshot(target, keys),
+      after: {
+        ...snapshot(next, keys),
+        ...(parsed.data.password !== undefined ? { passwordChanged: true } : {}),
+      },
+    });
+    return next;
   });
 
   return NextResponse.json(updated);

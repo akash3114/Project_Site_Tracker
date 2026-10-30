@@ -53,16 +53,6 @@ export function fmtDateTimeIST(d: Date | string | null | undefined): string {
   return `${day} ${time}`;
 }
 
-export function isOverdue(
-  dueDate: Date | string | null | undefined,
-  status: string,
-  today = new Date(),
-): boolean {
-  if (!dueDate || status === "COMPLETED" || status === "completed") return false;
-  const due = typeof dueDate === "string" ? new Date(dueDate) : dueDate;
-  const startOfToday = new Date(today);
-  startOfToday.setUTCHours(0, 0, 0, 0);
-  const dueDay = new Date(due);
-  dueDay.setUTCHours(0, 0, 0, 0);
-  return dueDay.getTime() < startOfToday.getTime();
-}
+// Re-exported for callers that already import date formatting from here.
+// The implementation lives in `lib/dates.ts` so overdue logic exists once.
+export { isOverdue } from "./dates";

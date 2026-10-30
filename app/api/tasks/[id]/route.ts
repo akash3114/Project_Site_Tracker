@@ -7,7 +7,7 @@ import {
   requireTaskAccess,
 } from "@/lib/access";
 import { db } from "@/lib/db";
-import { taskDetailInclude, taskPermissions } from "@/lib/task-data";
+import { taskDetailInclude, taskPermissions, serializeTask } from "@/lib/task-data";
 import type { TaskScope } from "@/lib/task-scope";
 import { updateTaskSchema } from "@/lib/validations";
 
@@ -27,14 +27,14 @@ export async function GET(
     });
     if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const permissions = taskPermissions(user, access.task, access.role);
+    const permissions = taskPermissions(user, access.task, access);
     const { projectId, plazaId, departmentId } = access.task;
     const scope: TaskScope =
       departmentId !== null || projectId === null
         ? { kind: "department", departmentId }
         : { kind: "project", projectId, plazaId };
 
-    const [assignees, pendingReopen] = await Promise.all([
+    const [candidates, pendingReopen] = await Promise.all([
       permissions.canAssign
         ? assigneeCandidates(access.role, scope, user.id)
         : Promise.resolve([]),
@@ -49,10 +49,10 @@ export async function GET(
     ]);
 
     return NextResponse.json({
-      task,
+      task: serializeTask(task),
       events: task.activities,
       permissions,
-      assignees,
+      assigneeCandidates: candidates,
       reopenRequest: pendingReopen,
     });
   } catch (e) {
@@ -149,7 +149,7 @@ export async function PATCH(
       return next;
     });
 
-    return NextResponse.json(updated);
+    return NextResponse.json(serializeTask(updated));
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

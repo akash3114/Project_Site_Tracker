@@ -8,6 +8,7 @@
  */
 
 import type { ProjectSummary } from "@/lib/dashboard";
+import { todayIst, utcDay } from "@/lib/dates";
 import { isOverdue } from "@/lib/format";
 import {
   parseScopeKey,
@@ -31,6 +32,7 @@ export type MgmtTask = {
   createdAt?: string | null;
   updatedAt?: string | null;
   completedAt?: string | null;
+  scope?: "PROJECT" | "PLAZA" | "DEPARTMENT" | "HEAD_OFFICE" | string | null;
   projectId?: string | null;
   plazaId?: string | null;
   departmentId?: string | null;
@@ -54,7 +56,8 @@ export type MgmtTask = {
     sortOrder?: number | null;
   } | null;
   category?: { id: string; name: string } | null;
-  assignee?: { id: string; name: string } | null;
+  /** Everyone on the task, ordered by assignment time; empty = unassigned. */
+  assignees: Array<{ id: string; name: string }>;
   createdBy?: { id: string; name: string } | null;
   completedBy?: { id: string; name: string } | null;
 };
@@ -77,11 +80,14 @@ export type MgmtPlaza = {
   id: string;
   projectId: string;
   name: string;
-  state?: string | null;
-  piu?: string | null;
-  ro?: string | null;
   lengthKm?: number | null;
-  project?: { id: string; name: string } | null;
+  project?: {
+    id: string;
+    name: string;
+    state?: string | null;
+    piu?: string | null;
+    ro?: string | null;
+  } | null;
   task: { total: number; completed: number; blocked: number; overdue: number };
   progressPct: number;
 };
@@ -221,11 +227,9 @@ export function isCompleted(task: MgmtTask): boolean {
   return task.status === "COMPLETED";
 }
 
-/** UTC midnight today, matching `lib/format.isOverdue`. */
+/** Today in the app timezone, as a UTC-midnight timestamp. */
 function todayStart(today: Date): number {
-  const start = new Date(today);
-  start.setUTCHours(0, 0, 0, 0);
-  return start.getTime();
+  return todayIst(today).getTime();
 }
 
 export type DueBucket = "overdue" | "today" | "week" | "later" | "none";
@@ -233,10 +237,8 @@ export type DueBucket = "overdue" | "today" | "week" | "later" | "none";
 /** Due urgency for open tasks. Completed tasks report "none". */
 export function dueBucket(task: MgmtTask, today = new Date()): DueBucket {
   if (isCompleted(task) || !task.dueDate) return "none";
-  const due = new Date(task.dueDate);
-  if (Number.isNaN(due.getTime())) return "none";
-  const dueDay = new Date(due);
-  dueDay.setUTCHours(0, 0, 0, 0);
+  const dueDay = utcDay(task.dueDate);
+  if (Number.isNaN(dueDay.getTime())) return "none";
   const start = todayStart(today);
   if (dueDay.getTime() < start) return "overdue";
   if (dueDay.getTime() === start) return "today";
@@ -269,9 +271,16 @@ export function isHeadOfficeTask(task: MgmtTask): boolean {
   return departmentIdOf(task) !== null || projectIdOf(task) === null;
 }
 
-/** The three scope columns, normalised from the payload's nested relations. */
+/** The scope discriminator and columns, normalised from the payload. */
 export function scopeFieldsOf(task: MgmtTask): TaskScopeFields {
   return {
+    scope:
+      task.scope === "PROJECT" ||
+      task.scope === "PLAZA" ||
+      task.scope === "DEPARTMENT" ||
+      task.scope === "HEAD_OFFICE"
+        ? task.scope
+        : null,
     projectId: projectIdOf(task),
     plazaId: plazaIdOf(task),
     departmentId: departmentIdOf(task),
@@ -294,7 +303,6 @@ function haystack(task: MgmtTask): string {
     task.title,
     task.description ?? "",
     task.plaza?.name ?? "",
-    task.plaza?.state ?? "",
     projectNameOf(task),
     task.project?.acronym ?? "",
     task.project?.company?.name ?? "",
@@ -304,7 +312,7 @@ function haystack(task: MgmtTask): string {
     // Location words: the scope picker's own vocabulary.
     ...(isHeadOfficeTask(task) ? ["head office"] : []),
     task.category?.name ?? "",
-    task.assignee?.name ?? "",
+    ...task.assignees.map((person) => person.name),
     statusOf(task),
     priorityOf(task),
   ]
@@ -331,7 +339,10 @@ export function scopeTasks(
       const fields = scopeFieldsOf(task);
       if (!refs.some((ref) => taskMatchesScope(fields, ref))) return false;
     }
-    if (filters.assigneeId && task.assignee?.id !== filters.assigneeId) {
+    if (
+      filters.assigneeId &&
+      !task.assignees.some((person) => person.id === filters.assigneeId)
+    ) {
       return false;
     }
     if (q && !haystack(task).includes(q)) return false;
@@ -405,8 +416,13 @@ export function filterTasks(
     ) {
       return false;
     }
-    if (filters.mine && task.assignee?.id !== userId) return false;
-    if (filters.unassigned && task.assignee) return false;
+    if (
+      filters.mine &&
+      !task.assignees.some((person) => person.id === userId)
+    ) {
+      return false;
+    }
+    if (filters.unassigned && task.assignees.length > 0) return false;
     if (filters.overdue && !isOverdue(task.dueDate, task.status)) return false;
     if (filters.dueWeek) {
       const bucket = dueBucket(task);
@@ -676,8 +692,10 @@ export function countFacets(
     low: open.filter((task) => priorityOf(task) === "LOW").length,
     overdue: open.filter((task) => isOverdue(task.dueDate, task.status)).length,
     blocked: open.filter((task) => statusOf(task) === "BLOCKED").length,
-    unassigned: open.filter((task) => !task.assignee).length,
-    mine: open.filter((task) => task.assignee?.id === userId).length,
+    unassigned: open.filter((task) => task.assignees.length === 0).length,
+    mine: open.filter((task) =>
+      task.assignees.some((person) => person.id === userId),
+    ).length,
     headOffice: open.filter(isHeadOfficeTask).length,
     dueWeek: open.filter((task) => {
       const bucket = dueBucket(task);

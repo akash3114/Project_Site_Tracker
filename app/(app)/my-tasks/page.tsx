@@ -67,9 +67,11 @@ function MyTasksInner() {
   {
     const seen = new Set<string>();
     for (const t of tasks) {
-      if (t.assignee && !seen.has(t.assignee.id)) {
-        seen.add(t.assignee.id);
-        assignees.push({ id: t.assignee.id, name: t.assignee.name });
+      for (const person of t.assignees ?? []) {
+        if (!seen.has(person.id)) {
+          seen.add(person.id);
+          assignees.push({ id: person.id, name: person.name });
+        }
       }
     }
   }
