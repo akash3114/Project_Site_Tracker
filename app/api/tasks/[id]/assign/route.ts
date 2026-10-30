@@ -6,11 +6,16 @@ import {
   requireTaskAccess,
 } from "@/lib/access";
 import { db } from "@/lib/db";
-import { taskPermissions } from "@/lib/task-data";
+import { serializeTask, taskInclude, taskPermissions } from "@/lib/task-data";
 import type { TaskScope } from "@/lib/task-scope";
 import { assignSchema } from "@/lib/validations";
 
-/** POST /api/tasks/:id/assign → change or clear the assignee. */
+/**
+ * POST /api/tasks/:id/assign → replace the assignee set.
+ *
+ * The body is `{ assigneeIds: string[] }`; an empty array clears every
+ * assignee. One ASSIGNED activity row is written per added/removed person.
+ */
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
@@ -27,7 +32,7 @@ export async function POST(
         { status: 400 },
       );
     }
-    const { assigneeId } = parsed.data;
+    const { assigneeIds } = parsed.data;
 
     const access = await requireTaskAccess(user, params.id);
     if (access.task.status === "COMPLETED") {
@@ -37,7 +42,7 @@ export async function POST(
       );
     }
 
-    const permissions = taskPermissions(user, access.task, access.role);
+    const permissions = taskPermissions(user, access.task, access);
     if (!permissions.canAssign) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -48,34 +53,77 @@ export async function POST(
         ? { kind: "department", departmentId }
         : { kind: "project", projectId, plazaId };
 
-    if (assigneeId && !(await canAssignTo(access.role, scope, assigneeId))) {
-      return NextResponse.json(
-        { error: "That person cannot be assigned in this scope" },
-        { status: 422 },
-      );
+    for (const assigneeId of assigneeIds) {
+      if (!(await canAssignTo(access.role, scope, assigneeId))) {
+        return NextResponse.json(
+          { error: "That person cannot be assigned in this scope" },
+          { status: 422 },
+        );
+      }
     }
 
     const updated = await db.$transaction(async (tx) => {
+      const current = await tx.taskAssignee.findMany({
+        where: { taskId: params.id },
+        select: { userId: true },
+      });
+      const before = new Set(current.map((row) => row.userId));
+      const after = new Set(assigneeIds);
+
+      const removed = Array.from(before).filter((id) => !after.has(id));
+      const added = Array.from(after).filter((id) => !before.has(id));
+
+      if (removed.length > 0) {
+        await tx.taskAssignee.deleteMany({
+          where: { taskId: params.id, userId: { in: removed } },
+        });
+      }
+      if (added.length > 0) {
+        await tx.taskAssignee.createMany({
+          data: added.map((userId) => ({
+            taskId: params.id,
+            userId,
+            assignedById: user.id,
+          })),
+        });
+      }
+
+      // Touch the parent row so `updatedAt desc` lists stay accurate.
       const next = await tx.task.update({
         where: { id: params.id },
-        data: { assigneeId: assigneeId ?? null },
-        include: { assignee: { select: { id: true, name: true } } },
+        data: { updatedAt: new Date() },
+        include: taskInclude,
       });
-      await tx.taskActivity.create({
-        data: {
-          taskId: params.id,
-          actorId: user.id,
-          type: "ASSIGNED",
-          fromStatus: access.task.status,
-          toStatus: access.task.status,
-          fromAssigneeId: access.task.assigneeId,
-          toAssigneeId: assigneeId ?? null,
-        },
-      });
+
+      for (const userId of removed) {
+        await tx.taskActivity.create({
+          data: {
+            taskId: params.id,
+            actorId: user.id,
+            type: "ASSIGNED",
+            fromStatus: access.task.status,
+            toStatus: access.task.status,
+            fromAssigneeId: userId,
+          },
+        });
+      }
+      for (const userId of added) {
+        await tx.taskActivity.create({
+          data: {
+            taskId: params.id,
+            actorId: user.id,
+            type: "ASSIGNED",
+            fromStatus: access.task.status,
+            toStatus: access.task.status,
+            toAssigneeId: userId,
+          },
+        });
+      }
+
       return next;
     });
 
-    return NextResponse.json(updated);
+    return NextResponse.json(serializeTask(updated));
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

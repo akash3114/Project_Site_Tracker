@@ -1,4 +1,4 @@
-import type { Prisma, Task } from "@prisma/client";
+import { Prisma, type Task } from "@prisma/client";
 
 import {
   headOfficeContext,
@@ -37,9 +37,29 @@ export type TaskWithScope = Pick<
   | "plazaId"
   | "departmentId"
   | "status"
-  | "assigneeId"
   | "createdById"
 >;
+
+/** The task shape every access decision needs, including its assignees. */
+export type TaskAccessTask = TaskWithScope & {
+  assignees: { userId: string }[];
+};
+
+export type TaskAccess = {
+  task: TaskAccessTask;
+  /** Effective role used for capability rules. */
+  role: ScopeRole;
+  /**
+   * Role held through a project/plaza assignment or a global role. Null when
+   * access comes only from being an assignee, the creator, or a manager above.
+   * Manager-only observers must not inherit PM-style edit/assign rights.
+   */
+  scopeRole: ScopeRole | null;
+  isAssignee: boolean;
+  isCreator: boolean;
+  /** The caller is above an assignee/creator in the reporting chain. */
+  isManagerAbove: boolean;
+};
 
 /** Department fields every membership select needs for display/ordering. */
 const membershipDepartmentSelect = {
@@ -105,6 +125,46 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Reporting line
+// ---------------------------------------------------------------------------
+
+/**
+ * Everyone below a user in the reporting chain, at any depth. The `UNION`
+ * (not `UNION ALL`) makes the recursion cycle-safe: a bad manager link cannot
+ * loop forever.
+ */
+export async function descendantUserIds(userId: string): Promise<string[]> {
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    WITH RECURSIVE downline AS (
+      SELECT "id" FROM "User" WHERE "managerId" = ${userId}
+      UNION
+      SELECT u."id" FROM "User" u
+      JOIN downline d ON u."managerId" = d."id"
+    )
+    SELECT DISTINCT "id" FROM downline
+  `;
+  return rows.map((row) => row.id);
+}
+
+/** Every manager above the given people, including the people themselves. */
+async function managerAncestorIds(userIds: string[]): Promise<Set<string>> {
+  const ids = Array.from(new Set(userIds.filter(Boolean)));
+  if (ids.length === 0) return new Set();
+
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    WITH RECURSIVE upline AS (
+      SELECT "id", "managerId" FROM "User"
+      WHERE "id" IN (${Prisma.join(ids)})
+      UNION
+      SELECT u."id", u."managerId" FROM "User" u
+      JOIN upline p ON u."id" = p."managerId"
+    )
+    SELECT DISTINCT "id" FROM upline
+  `;
+  return new Set(rows.map((row) => row.id));
+}
+
+// ---------------------------------------------------------------------------
 // Visibility
 // ---------------------------------------------------------------------------
 
@@ -117,7 +177,8 @@ export async function accessibleProjectIds(
     return all.map((p) => p.id);
   }
 
-  const [pm, site] = await Promise.all([
+  const downline = await descendantUserIds(user.id);
+  const [pm, site, downAssignments, downTasks] = await Promise.all([
     db.projectAssignment.findMany({
       where: { userId: user.id },
       select: { projectId: true },
@@ -126,11 +187,32 @@ export async function accessibleProjectIds(
       where: { userId: user.id },
       select: { plaza: { select: { projectId: true } } },
     }),
+    downline.length > 0
+      ? db.projectAssignment.findMany({
+          where: { userId: { in: downline } },
+          select: { projectId: true },
+        })
+      : Promise.resolve([] as Array<{ projectId: string }>),
+    downline.length > 0
+      ? db.task.findMany({
+          where: {
+            OR: [
+              { assignees: { some: { userId: { in: downline } } } },
+              { createdById: { in: downline } },
+            ],
+          },
+          select: { projectId: true },
+        })
+      : Promise.resolve([] as Array<{ projectId: string | null }>),
   ]);
   return Array.from(
     new Set([
       ...pm.map((r) => r.projectId),
       ...site.map((r) => r.plaza.projectId),
+      ...downAssignments.map((r) => r.projectId),
+      ...downTasks
+        .map((r) => r.projectId)
+        .filter((id): id is string => id !== null),
     ]),
   );
 }
@@ -142,7 +224,8 @@ export async function accessiblePlazaIds(user: SessionUser): Promise<string[]> {
     return all.map((p) => p.id);
   }
 
-  const [direct, viaProjects] = await Promise.all([
+  const downline = await descendantUserIds(user.id);
+  const [direct, viaProjects, downAssignments, downTasks] = await Promise.all([
     db.plazaAssignment.findMany({
       where: { userId: user.id },
       select: { plazaId: true },
@@ -151,10 +234,31 @@ export async function accessiblePlazaIds(user: SessionUser): Promise<string[]> {
       where: { userId: user.id },
       select: { project: { select: { plazas: { select: { id: true } } } } },
     }),
+    downline.length > 0
+      ? db.plazaAssignment.findMany({
+          where: { userId: { in: downline } },
+          select: { plazaId: true },
+        })
+      : Promise.resolve([] as Array<{ plazaId: string }>),
+    downline.length > 0
+      ? db.task.findMany({
+          where: {
+            OR: [
+              { assignees: { some: { userId: { in: downline } } } },
+              { createdById: { in: downline } },
+            ],
+          },
+          select: { plazaId: true },
+        })
+      : Promise.resolve([] as Array<{ plazaId: string | null }>),
   ]);
   const ids = new Set<string>(direct.map((r) => r.plazaId));
   for (const pa of viaProjects) {
     for (const z of pa.project.plazas) ids.add(z.id);
+  }
+  for (const row of downAssignments) ids.add(row.plazaId);
+  for (const row of downTasks) {
+    if (row.plazaId !== null) ids.add(row.plazaId);
   }
   return Array.from(ids);
 }
@@ -165,15 +269,17 @@ export async function accessiblePlazaIds(user: SessionUser): Promise<string[]> {
  * PM: every task in the projects they are assigned to, including project-level tasks.
  * Site manager: tasks in the plazas they are assigned to, plus any task
  * assigned to them (project-level tasks included).
+ * Anyone: every task assigned to or created by a person below them in the
+ * reporting chain, at any depth.
  *
- * A person can hold both kinds of assignment, so the three clauses are unioned.
+ * A person can hold several kinds of relationship, so the clauses are unioned.
  */
 export async function taskScopeWhere(
   user: SessionUser,
 ): Promise<Prisma.TaskWhereInput> {
   if (user.isAdmin || user.role === "HEAD_OFFICE") return {};
 
-  const [pmProjects, sitePlazas] = await Promise.all([
+  const [pmProjects, sitePlazas, downline] = await Promise.all([
     db.projectAssignment.findMany({
       where: { userId: user.id },
       select: { projectId: true },
@@ -182,6 +288,7 @@ export async function taskScopeWhere(
       where: { userId: user.id },
       select: { plazaId: true },
     }),
+    descendantUserIds(user.id),
   ]);
 
   const clauses: Prisma.TaskWhereInput[] = [];
@@ -191,7 +298,13 @@ export async function taskScopeWhere(
   if (sitePlazas.length > 0) {
     clauses.push({ plazaId: { in: sitePlazas.map((r) => r.plazaId) } });
   }
-  clauses.push({ assigneeId: user.id });
+  clauses.push({ assignees: { some: { userId: user.id } } });
+  clauses.push({ createdById: user.id });
+
+  if (downline.length > 0) {
+    clauses.push({ assignees: { some: { userId: { in: downline } } } });
+    clauses.push({ createdById: { in: downline } });
+  }
 
   return { OR: clauses };
 }
@@ -219,8 +332,31 @@ export async function requireProjectAccess(
       select: { plazaId: true },
     }),
   ]);
-  if (!pm && !site) throw new Response("Forbidden", { status: 403 });
-  return user;
+  if (pm || site) return user;
+
+  // A manager above someone working on this project may open the project page.
+  const downline = await descendantUserIds(user.id);
+  if (downline.length > 0) {
+    const [downAssignment, downTask] = await Promise.all([
+      db.projectAssignment.findFirst({
+        where: { projectId, userId: { in: downline } },
+        select: { projectId: true },
+      }),
+      db.task.findFirst({
+        where: {
+          projectId,
+          OR: [
+            { assignees: { some: { userId: { in: downline } } } },
+            { createdById: { in: downline } },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (downAssignment || downTask) return user;
+  }
+
+  throw new Response("Forbidden", { status: 403 });
 }
 
 export async function requirePlazaAccess(
@@ -248,7 +384,30 @@ export async function requirePlazaAccess(
       select: { projectId: true },
     }),
   ]);
-  if (!direct && !viaProject) throw new Response("Forbidden", { status: 403 });
+  if (!direct && !viaProject) {
+    // A manager above someone working on this plaza may open the plaza page.
+    const downline = await descendantUserIds(user.id);
+    if (downline.length > 0) {
+      const [downAssignment, downTask] = await Promise.all([
+        db.plazaAssignment.findFirst({
+          where: { plazaId, userId: { in: downline } },
+          select: { plazaId: true },
+        }),
+        db.task.findFirst({
+          where: {
+            plazaId,
+            OR: [
+              { assignees: { some: { userId: { in: downline } } } },
+              { createdById: { in: downline } },
+            ],
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (downAssignment || downTask) return user;
+    }
+    throw new Response("Forbidden", { status: 403 });
+  }
   return user;
 }
 
@@ -256,19 +415,14 @@ export async function requirePlazaAccess(
 // Effective role on a task
 // ---------------------------------------------------------------------------
 
-export async function effectiveTaskRole(
+/** Role held through a project/plaza assignment. Null for task-only access. */
+async function scopeRoleOnTask(
   user: SessionUser,
-  task: TaskWithScope,
+  task: TaskAccessTask,
 ): Promise<ScopeRole | null> {
-  if (user.isAdmin) return "ADMIN";
-  // Head Office is global: membership is not scoped to a company/project.
-  if (user.role === "HEAD_OFFICE") return "HEAD_OFFICE";
-
   // Head Office tasks (department scope or Head Office level) are invisible to
-  // project/site users unless the task is assigned to them.
-  if (task.departmentId !== null || task.projectId === null) {
-    return task.assigneeId === user.id ? "SITE_MANAGER" : null;
-  }
+  // project/site users unless the task is assigned to them or a junior owns it.
+  if (task.departmentId !== null || task.projectId === null) return null;
 
   const projectId = task.projectId;
   const [pm, site] = await Promise.all([
@@ -288,10 +442,91 @@ export async function effectiveTaskRole(
 
   if (pm) return "PROJECT_MANAGER";
   if (site) return "SITE_MANAGER";
-  // A site manager assigned a project-level task still needs status/comment
-  // access even though they hold no plaza assignment on that task.
-  if (task.assigneeId === user.id) return "SITE_MANAGER";
   return null;
+}
+
+/**
+ * Resolve how (and whether) a user may act on a task.
+ *
+ * Access comes from one of:
+ * - a global role (Admin, Head Office);
+ * - a project/plaza assignment (`scopeRole`);
+ * - being an assignee or the creator;
+ * - being above an assignee/creator in the reporting chain.
+ *
+ * The first three keep their existing rights. A manager-only observer gets
+ * view/comment/status but no edit or reassign rights, because `scopeRole` is
+ * null and `isManagerAbove` is true.
+ */
+export async function resolveTaskAccess(
+  user: SessionUser,
+  task: TaskAccessTask,
+): Promise<TaskAccess | null> {
+  const isAssignee = task.assignees.some((row) => row.userId === user.id);
+  const isCreator = task.createdById === user.id;
+
+  if (user.isAdmin) {
+    return {
+      task,
+      role: "ADMIN",
+      scopeRole: "ADMIN",
+      isAssignee,
+      isCreator,
+      isManagerAbove: false,
+    };
+  }
+  // Head Office is global: membership is not scoped to a company/project.
+  if (user.role === "HEAD_OFFICE") {
+    return {
+      task,
+      role: "HEAD_OFFICE",
+      scopeRole: "HEAD_OFFICE",
+      isAssignee,
+      isCreator,
+      isManagerAbove: false,
+    };
+  }
+
+  const owners = [
+    ...task.assignees.map((row) => row.userId),
+    task.createdById,
+  ];
+  const ancestors = await managerAncestorIds(owners);
+  const isManagerAbove =
+    !isAssignee && !isCreator && ancestors.has(user.id);
+
+  const scopeRole = await scopeRoleOnTask(user, task);
+  if (scopeRole) {
+    return {
+      task,
+      role: scopeRole,
+      scopeRole,
+      isAssignee,
+      isCreator,
+      isManagerAbove,
+    };
+  }
+
+  if (isAssignee || isCreator || isManagerAbove) {
+    return {
+      task,
+      role: "SITE_MANAGER",
+      scopeRole: null,
+      isAssignee,
+      isCreator,
+      isManagerAbove,
+    };
+  }
+
+  return null;
+}
+
+export async function effectiveTaskRole(
+  user: SessionUser,
+  task: TaskAccessTask,
+): Promise<ScopeRole | null> {
+  const access = await resolveTaskAccess(user, task);
+  return access?.role ?? null;
 }
 
 /** Highest role the caller holds in a scope, for creation and assignment. */
@@ -328,7 +563,7 @@ export async function actorScopeRole(
 export async function requireTaskAccess(
   user: SessionUser | null,
   taskId: string,
-): Promise<{ task: TaskWithScope; role: ScopeRole }> {
+): Promise<TaskAccess> {
   if (!user) throw new Response("Unauthorized", { status: 401 });
 
   const task = await db.task.findUnique({
@@ -340,15 +575,15 @@ export async function requireTaskAccess(
       plazaId: true,
       departmentId: true,
       status: true,
-      assigneeId: true,
       createdById: true,
+      assignees: { select: { userId: true } },
     },
   });
   if (!task) throw new Response("Not found", { status: 404 });
 
-  const role = await effectiveTaskRole(user, task);
-  if (!role) throw new Response("Forbidden", { status: 403 });
-  return { task, role };
+  const access = await resolveTaskAccess(user, task);
+  if (!access) throw new Response("Forbidden", { status: 403 });
+  return access;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,26 +618,34 @@ export function canEditTaskCore(
   return task.createdById === user.id;
 }
 
-/** Status changes are open to anyone with task access, except completed tasks. */
-export function canChangeTaskStatus(
-  task: TaskWithScope,
-  role: ScopeRole | null,
-): boolean {
-  return role !== null && task.status !== "COMPLETED";
+/**
+ * Status changes belong to the people who own the work, not every peer who can
+ * see it: an assignee, the creator, a manager above them in the reporting
+ * chain, or Admin/Head Office/Project Manager.
+ */
+export function canChangeTaskStatus(access: TaskAccess): boolean {
+  if (access.task.status === "COMPLETED") return false;
+  if (
+    access.role === "ADMIN" ||
+    access.role === "HEAD_OFFICE" ||
+    access.role === "PROJECT_MANAGER"
+  ) {
+    return true;
+  }
+  return access.isAssignee || access.isCreator || access.isManagerAbove;
 }
 
 export function canReopenDirectly(role: ScopeRole): boolean {
   return role === "ADMIN" || role === "HEAD_OFFICE";
 }
 
-export function canRequestReopen(
-  task: TaskWithScope,
-  role: ScopeRole | null,
-): boolean {
-  return (
-    task.status === "COMPLETED" &&
-    (role === "PROJECT_MANAGER" || role === "SITE_MANAGER")
-  );
+export function canRequestReopen(access: TaskAccess): boolean {
+  if (access.task.status !== "COMPLETED") return false;
+  if (access.role === "PROJECT_MANAGER") return true;
+  if (access.role === "SITE_MANAGER") {
+    return access.isAssignee || access.isCreator || access.isManagerAbove;
+  }
+  return false;
 }
 
 export function canApproveReopen(role: ScopeRole): boolean {

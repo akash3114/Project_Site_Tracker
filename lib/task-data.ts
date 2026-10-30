@@ -1,4 +1,4 @@
-import type { Task, TaskActivityType, TaskStatus } from "@prisma/client";
+import type { TaskActivityType, TaskStatus } from "@prisma/client";
 
 import {
   canApproveReopen,
@@ -6,8 +6,9 @@ import {
   canEditTaskCore,
   canReopenDirectly,
   canRequestReopen,
-  type ScopeRole,
   type SessionUser,
+  type TaskAccess,
+  type TaskAccessTask,
 } from "@/lib/access";
 
 export const taskInclude = {
@@ -31,10 +32,46 @@ export const taskInclude = {
   department: {
     select: { id: true, name: true, code: true, sortOrder: true },
   },
-  assignee: { select: { id: true, name: true } },
+  assignees: {
+    orderBy: { assignedAt: "asc" as const },
+    select: {
+      assignedAt: true,
+      user: { select: { id: true, name: true } },
+    },
+  },
   createdBy: { select: { id: true, name: true } },
   completedBy: { select: { id: true, name: true } },
 } as const;
+
+/** The API shape for one assignee: flat id/name plus when they were added. */
+export type TaskAssigneeSummary = {
+  id: string;
+  name: string;
+  assignedAt: Date;
+};
+
+type AssigneeJoinRow = {
+  assignedAt: Date;
+  user: { id: string; name: string };
+};
+
+/**
+ * Flatten Prisma's join rows into `assignees: [{ id, name, assignedAt }]` so
+ * clients do not need to know about the `TaskAssignee` table.
+ */
+export function serializeTask<
+  T extends { assignees: AssigneeJoinRow[] },
+>(task: T): Omit<T, "assignees"> & { assignees: TaskAssigneeSummary[] } {
+  const { assignees, ...rest } = task;
+  return {
+    ...rest,
+    assignees: assignees.map(({ assignedAt, user }) => ({
+      id: user.id,
+      name: user.name,
+      assignedAt,
+    })),
+  };
+}
 
 export const taskDetailInclude = {
   ...taskInclude,
@@ -86,33 +123,29 @@ export type TaskPermissions = {
 
 export function taskPermissions(
   user: SessionUser,
-  task: Pick<
-    Task,
-    | "status"
-    | "scope"
-    | "projectId"
-    | "plazaId"
-    | "departmentId"
-    | "assigneeId"
-    | "createdById"
-  >,
-  role: ScopeRole,
+  task: TaskAccessTask,
+  access: TaskAccess,
 ): TaskPermissions {
   const projectScoped = task.scope === "PROJECT" || task.scope === "PLAZA";
+  const hasScopeRole = access.scopeRole !== null;
   return {
-    canEdit: canEditTaskCore(user, task, role),
-    canChangeStatus: canChangeTaskStatus(task, role),
+    canEdit: canEditTaskCore(user, task, access.role),
+    canChangeStatus: canChangeTaskStatus(access),
     // Head Office tasks (department or Head Office level) may only be
     // (re)assigned by Admin or HO. Project tasks keep the existing ceiling.
+    // A manager-only observer has no scope role, so they cannot reassign.
     canAssign:
       task.status !== "COMPLETED" &&
-      (projectScoped || role === "ADMIN" || role === "HEAD_OFFICE"),
-    canReopenDirect: task.status === "COMPLETED" && canReopenDirectly(role),
-    canRequestReopen: canRequestReopen(task, role),
-    canApproveReopen: canApproveReopen(role),
+      hasScopeRole &&
+      (projectScoped ||
+        access.scopeRole === "ADMIN" ||
+        access.scopeRole === "HEAD_OFFICE"),
+    canReopenDirect: task.status === "COMPLETED" && canReopenDirectly(access.role),
+    canRequestReopen: canRequestReopen(access),
+    canApproveReopen: canApproveReopen(access.role),
     canComment: true,
     canUpload: true,
-    canAdminDelete: role === "ADMIN",
+    canAdminDelete: access.role === "ADMIN",
   };
 }
 

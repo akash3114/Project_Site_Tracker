@@ -14,7 +14,7 @@ import {
 } from "@/lib/access";
 import { todayIst } from "@/lib/dates";
 import { db } from "@/lib/db";
-import { taskInclude } from "@/lib/task-data";
+import { taskInclude, serializeTask } from "@/lib/task-data";
 import type { TaskScope } from "@/lib/task-scope";
 import { createTaskSchema, createTasksSchema } from "@/lib/validations";
 
@@ -47,7 +47,7 @@ type TaskInput = {
   title: string;
   description?: string;
   priority: "LOW" | "MEDIUM" | "HIGH";
-  assigneeId?: string;
+  assigneeIds: string[];
   dueDate?: string;
   categoryId?: string;
 };
@@ -155,7 +155,7 @@ async function categoryError(
 async function scopeAccessError(
   user: SessionUser,
   resolved: ResolvedScope,
-  assigneeId: string | undefined,
+  assigneeIds: string[],
 ): Promise<Response | null> {
   if (!(await canCreateTask(user, resolved.scope))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -166,14 +166,13 @@ async function scopeAccessError(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (
-    assigneeId &&
-    !(await canAssignTo(actorRole, resolved.scope, assigneeId))
-  ) {
-    return NextResponse.json(
-      { error: "That person cannot be assigned in this scope" },
-      { status: 422 },
-    );
+  for (const assigneeId of assigneeIds) {
+    if (!(await canAssignTo(actorRole, resolved.scope, assigneeId))) {
+      return NextResponse.json(
+        { error: "That person cannot be assigned in this scope" },
+        { status: 422 },
+      );
+    }
   }
 
   return null;
@@ -207,7 +206,12 @@ async function createScopedTask(
       title: input.title,
       description: input.description ?? null,
       priority: input.priority,
-      assigneeId: input.assigneeId ?? null,
+      assignees: {
+        create: input.assigneeIds.map((userId) => ({
+          userId,
+          assignedById: user.id,
+        })),
+      },
       dueDate: input.dueDate ? new Date(`${input.dueDate}T00:00:00Z`) : null,
       createdById: user.id,
     },
@@ -220,12 +224,12 @@ async function createScopedTask(
       actorId: user.id,
       type: "CREATED",
       toStatus: "TODO",
-      toAssigneeId: input.assigneeId ?? null,
+      toAssigneeId: input.assigneeIds[0] ?? null,
       text: createdActivityText(resolved),
     },
   });
 
-  if (input.assigneeId) {
+  for (const assigneeId of input.assigneeIds) {
     await tx.taskActivity.create({
       data: {
         taskId: created.id,
@@ -233,7 +237,7 @@ async function createScopedTask(
         type: "ASSIGNED",
         fromStatus: "TODO",
         toStatus: "TODO",
-        toAssigneeId: input.assigneeId,
+        toAssigneeId: assigneeId,
       },
     });
   }
@@ -315,11 +319,24 @@ export async function GET(req: Request): Promise<Response> {
     if (categoryId) constraints.push({ categoryId });
     if (assigneeParam) {
       constraints.push({
-        assigneeId: assigneeParam === "me" ? user.id : assigneeParam,
+        assignees: {
+          some: { userId: assigneeParam === "me" ? user.id : assigneeParam },
+        },
       });
     }
     if (q) {
-      constraints.push({ title: { contains: q, mode: "insensitive" } });
+      constraints.push({
+        OR: [
+          { title: { contains: q, mode: "insensitive" } },
+          {
+            assignees: {
+              some: {
+                user: { name: { contains: q, mode: "insensitive" } },
+              },
+            },
+          },
+        ],
+      });
     }
 
     const where: Prisma.TaskWhereInput = {
@@ -337,7 +354,12 @@ export async function GET(req: Request): Promise<Response> {
       }),
     ]);
 
-    return NextResponse.json({ items, total, page, pageSize });
+    return NextResponse.json({
+      items: items.map(serializeTask),
+      total,
+      page,
+      pageSize,
+    });
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;
@@ -364,8 +386,18 @@ export async function POST(req: Request): Promise<Response> {
         );
       }
 
-      const { scopes, title, description, priority, assigneeId, dueDate, categoryId } =
-        parsed.data;
+      const {
+        scopes,
+        title,
+        description,
+        priority,
+        assigneeIds,
+        assigneeId,
+        dueDate,
+        categoryId,
+      } = parsed.data;
+      const resolvedAssigneeIds =
+        assigneeIds ?? (assigneeId ? [assigneeId] : []);
 
       const categoryFailure = await categoryError(categoryId);
       if (categoryFailure) return categoryFailure;
@@ -377,7 +409,11 @@ export async function POST(req: Request): Promise<Response> {
         const target = await resolveScope(scopeInput);
         if (target instanceof Response) return target;
 
-        const accessFailure = await scopeAccessError(user, target, assigneeId);
+        const accessFailure = await scopeAccessError(
+          user,
+          target,
+          resolvedAssigneeIds,
+        );
         if (accessFailure) return accessFailure;
 
         resolved.push(target);
@@ -391,7 +427,7 @@ export async function POST(req: Request): Promise<Response> {
               title,
               description,
               priority,
-              assigneeId,
+              assigneeIds: resolvedAssigneeIds,
               dueDate,
               categoryId,
             }),
@@ -401,7 +437,7 @@ export async function POST(req: Request): Promise<Response> {
       });
 
       return NextResponse.json(
-        { items, count: items.length },
+        { items: items.map(serializeTask), count: items.length },
         { status: 201 },
       );
     }
@@ -421,10 +457,13 @@ export async function POST(req: Request): Promise<Response> {
       title,
       description,
       priority,
+      assigneeIds,
       assigneeId,
       dueDate,
       categoryId,
     } = parsed.data;
+    const resolvedAssigneeIds =
+      assigneeIds ?? (assigneeId ? [assigneeId] : []);
 
     const categoryFailure = await categoryError(categoryId);
     if (categoryFailure) return categoryFailure;
@@ -432,7 +471,11 @@ export async function POST(req: Request): Promise<Response> {
     const target = await resolveScope({ projectId, plazaId, departmentId });
     if (target instanceof Response) return target;
 
-    const accessFailure = await scopeAccessError(user, target, assigneeId);
+    const accessFailure = await scopeAccessError(
+      user,
+      target,
+      resolvedAssigneeIds,
+    );
     if (accessFailure) return accessFailure;
 
     const task = await db.$transaction((tx) =>
@@ -440,13 +483,13 @@ export async function POST(req: Request): Promise<Response> {
         title,
         description,
         priority,
-        assigneeId,
+        assigneeIds: resolvedAssigneeIds,
         dueDate,
         categoryId,
       }),
     );
 
-    return NextResponse.json(task, { status: 201 });
+    return NextResponse.json(serializeTask(task), { status: 201 });
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

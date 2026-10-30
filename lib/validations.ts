@@ -66,6 +66,8 @@ export const userSchema = z.object({
   title: z.string().max(100).optional(),
   password: z.string().min(6),
   isAdmin: z.boolean().default(false),
+  // Reporting line. Admin-only; validated for cycles in the route.
+  managerId: z.preprocess(emptyToNull, idSchema.nullable().optional()),
 });
 
 export const updateUserSchema = z.object({
@@ -75,6 +77,7 @@ export const updateUserSchema = z.object({
   isAdmin: z.boolean().optional(),
   active: z.boolean().optional(),
   password: z.string().min(6).optional(),
+  managerId: z.preprocess(emptyToNull, idSchema.nullable().optional()),
 });
 
 export const headOfficeMembershipSchema = z.object({
@@ -139,12 +142,23 @@ function taskScopeIssues(
 
 export const taskScopeSchema = taskScopeObject.superRefine(taskScopeIssues);
 
+/** Hard cap on assignees per task; keeps payloads and pickers sane. */
+export const MAX_TASK_ASSIGNEES = 20;
+
+/** Deduplicated list of assignee ids. */
+const assigneeIdsField = z
+  .array(idSchema)
+  .max(MAX_TASK_ASSIGNEES)
+  .transform((ids) => Array.from(new Set(ids)));
+
 export const createTaskSchema = taskScopeObject
   .extend({
     categoryId: z.preprocess(emptyToUndefined, idSchema.optional()),
     title: z.string().min(3).max(200),
     description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
     priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
+    assigneeIds: assigneeIdsField.optional(),
+    /** @deprecated Use `assigneeIds`; kept for one release. */
     assigneeId: z.preprocess(emptyToUndefined, idSchema.optional()),
     dueDate: z.preprocess(
       emptyToUndefined,
@@ -174,6 +188,8 @@ export const createTasksSchema = z
     title: z.string().min(3).max(200),
     description: z.preprocess(emptyToUndefined, z.string().max(5000).optional()),
     priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
+    assigneeIds: assigneeIdsField.optional(),
+    /** @deprecated Use `assigneeIds`; kept for one release. */
     assigneeId: z.preprocess(emptyToUndefined, idSchema.optional()),
     dueDate: z.preprocess(
       emptyToUndefined,
@@ -222,9 +238,22 @@ export const statusSchema = z.object({
   text: z.string().max(2000).optional(),
 });
 
-export const assignSchema = z.object({
-  assigneeId: idSchema.nullable(),
-});
+export const assignSchema = z
+  .object({
+    assigneeIds: assigneeIdsField.optional(),
+    /** @deprecated Use `assigneeIds`; kept for one release. */
+    assigneeId: idSchema.nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.assigneeIds !== undefined || value.assigneeId !== undefined,
+    { message: "Provide assigneeIds (an empty array clears the assignees)" },
+  )
+  .transform((value) => ({
+    assigneeIds:
+      value.assigneeIds ??
+      (value.assigneeId ? [value.assigneeId] : []),
+  }));
 
 export const commentSchema = z
   .object({

@@ -186,7 +186,7 @@ export async function POST(
       return NextResponse.json({ task: updated, request: null });
     }
 
-    if (!canRequestReopen(access.task, access.role)) {
+    if (!canRequestReopen(access)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
